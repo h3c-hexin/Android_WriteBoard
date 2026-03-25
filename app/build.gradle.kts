@@ -8,20 +8,30 @@ plugins {
 }
 
 android {
-    namespace = "com.paintboard"
+    namespace = "com.h3c.writeboard"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.paintboard"
+        applicationId = "com.h3c.writeboard"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
     }
 
+    signingConfigs {
+        create("release") {
+            storeFile = file("../keystore/whiteboard.jks")
+            storePassword = "whiteboard123"
+            keyAlias = "whiteboard"
+            keyPassword = "whiteboard123"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
