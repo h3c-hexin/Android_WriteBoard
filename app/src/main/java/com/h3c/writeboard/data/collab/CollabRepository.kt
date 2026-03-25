@@ -91,7 +91,8 @@ class CollabRepository @Inject constructor(
      */
     fun startHosting(
         hostDeviceName: String,
-        getPages: () -> List<DrawingPage>
+        getPages: () -> List<DrawingPage>,
+        getCurrentPageIndex: () -> Int
     ): String {
         if (server != null) return currentRoomCode
         currentRoomCode = (100000..999999).random().toString()
@@ -105,7 +106,7 @@ class CollabRepository @Inject constructor(
         notifyDeviceListChanged()
 
         server = embeddedServer(ServerCIO, port = collabPort) {
-            configureWebSocket(getPages)
+            configureWebSocket(getPages, getCurrentPageIndex)
         }.start(wait = false)
 
         registerNsd(currentRoomCode)
@@ -243,6 +244,7 @@ class CollabRepository @Inject constructor(
                                 }
                                 CollabMessage.JOIN_ACK -> {
                                     joinSucceeded = true
+                                    connectedDevices.clear()
                                     msg.deviceList?.forEach { connectedDevices[it.deviceId] = it }
                                     notifyDeviceListChanged()
                                     onMessageReceived?.invoke(msg)
@@ -384,7 +386,7 @@ class CollabRepository @Inject constructor(
 
     // ===== WebSocket 服务端 =====
 
-    private fun Application.configureWebSocket(getPages: () -> List<DrawingPage>) {
+    private fun Application.configureWebSocket(getPages: () -> List<DrawingPage>, getCurrentPageIndex: () -> Int) {
         install(ServerWebSockets) {
             pingPeriodMillis = 2000
             timeoutMillis = 10000
@@ -393,7 +395,7 @@ class CollabRepository @Inject constructor(
             webSocket("/collab") {
                 val deviceId = newDeviceId()
                 try {
-                    handleNewClient(deviceId, this, getPages)
+                    handleNewClient(deviceId, this, getPages, getCurrentPageIndex)
                 } finally {
                     sessions.remove(deviceId)
                     val leaving = connectedDevices.remove(deviceId)
@@ -412,7 +414,8 @@ class CollabRepository @Inject constructor(
     private suspend fun handleNewClient(
         deviceId: String,
         session: DefaultWebSocketServerSession,
-        getPages: () -> List<DrawingPage>
+        getPages: () -> List<DrawingPage>,
+        getCurrentPageIndex: () -> Int
     ) {
         var joined = false
         var deviceName = "PAD"
@@ -452,7 +455,8 @@ class CollabRepository @Inject constructor(
                 deviceId = deviceId,
                 deviceColor = color,
                 deviceList = connectedDevices.values.toList(),
-                pages = getPages()
+                pages = getPages(),
+                pageIndex = getCurrentPageIndex()
             )
         )))
 

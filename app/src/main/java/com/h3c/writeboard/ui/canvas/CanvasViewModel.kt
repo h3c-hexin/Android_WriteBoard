@@ -842,7 +842,8 @@ class CanvasViewModel @Inject constructor(
 
         val roomCode = collabRepository.startHosting(
             hostDeviceName = "大屏",
-            getPages = { _pages.value }
+            getPages = { _pages.value },
+            getCurrentPageIndex = { _currentPageIndex.value }
         )
         _collabState.value = CollabUiState(
             role = CollabRole.HOST,
@@ -1094,8 +1095,9 @@ class CanvasViewModel @Inject constructor(
                     val pages = msg.pages ?: return@launch
                     if (pages.isEmpty()) return@launch
                     _pages.value = pages
-                    _currentPageIndex.value = 0
-                    _page.value = pages[0]
+                    val idx = (msg.pageIndex ?: 0).coerceIn(0, pages.size - 1)
+                    _currentPageIndex.value = idx
+                    _page.value = pages[idx]
                     updateUndoRedoState()
                 }
                 CollabMessage.PAGE_STROKES_SYNC -> {
