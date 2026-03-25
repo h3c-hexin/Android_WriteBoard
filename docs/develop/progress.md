@@ -187,3 +187,24 @@
 - 未实现 HOST 主持人锁定模式（仅 Host 可翻页），所有端均可自由翻页
 - 未实现游标显示（不同设备实时光标彩圈），CURSOR_MOVE 消息已预留
 
+---
+
+### 书写流畅度优化（Post-MVP）
+
+**实现内容**
+- **历史触摸点**：通过 `PointerInputChange.historical` 补全帧间中间坐标，彻底消除采样丢点问题
+- **FrontBufferStrokeView**：`CanvasFrontBufferedRenderer<Segment>`（API 29+）绕过 Vsync 渲染活跃笔画，理论书写延迟 < 5ms
+- **StrokePredictor**：纯 Kotlin 速度外推预测器，在手指前方延伸 0.5~1 帧（16ms），API < 29 时在 Compose 层实时渲染预测点
+- **Path 缓存**：已提交笔画按 `stroke.id` 缓存 `android.graphics.Path`，避免每帧重建；擦除/Undo 时精确清理，画布 resize 时全量失效
+- **重组优化**：FrontBuffer 激活时不订阅 `activeStroke` StateFlow，彻底消除书写期间 DrawingCanvas 重组
+
+**架构文件**
+- `DrawingCanvas.kt`：新增三个 FrontBuffer 回调参数；`@OptIn(ExperimentalComposeUiApi::class)` 解锁 historical
+- `CanvasScreen.kt`：`AndroidView` 叠加 `FrontBufferStrokeView`；Choreographer 协调清空时机
+- `FrontBufferStrokeView.kt`（新文件）：增量 LineTo 段渲染，`lastRenderedIndex` 控制 delta
+- `StrokePredictor.kt`（新文件）：5 点历史窗口，最小速度阈值过滤
+
+**与设计偏差**
+- `InProgressStroke`（`androidx.ink`）输出 GPU mesh 顶点缓冲，与 `canvas.drawPath` 路径不兼容，未采用
+- API 29（Android 10）而非文档标注的 API 31 即可使用 `CanvasFrontBufferedRenderer`，已下调 guard
+

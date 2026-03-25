@@ -200,23 +200,35 @@ class CanvasViewModel @Inject constructor(
         _activeStroke.value = listOf(StrokePoint(x, y, pressure))
     }
 
-    /** 手指移动：追加点（距离过滤，避免密集采样导致曲线锯齿）*/
+    /** 手指移动：追加点（不做距离过滤，保留全部历史点以保证 FrontBuffer 与 Compose 使用相同点集）*/
     fun onStrokeMove(x: Float, y: Float, pressure: Float = 1.0f) {
-        _activeStroke.update { points ->
-            val last = points.lastOrNull()
-            if (last != null) {
-                val dx = x - last.x
-                val dy = y - last.y
-                // 归一化距离小于 0.003（约为画布宽度的 0.3%）时跳过，减少噪点
-                if (dx * dx + dy * dy < 0.003f * 0.003f) return@update points
-            }
-            points + StrokePoint(x, y, pressure)
-        }
+        _activeStroke.update { it + StrokePoint(x, y, pressure) }
     }
 
-    /** 手指抬起：完成笔画，写入页面，压入 Undo 栈 */
-    fun onStrokeEnd() {
-        val points = _activeStroke.value
+    /**
+     * 批量追加触摸点（历史点 + 当前点一次性写入，减少 StateFlow 更新次数和 GC 压力）。
+     * DrawingCanvas 在每次 PointerEvent 时调用，替代逐点调用 onStrokeMove。
+     */
+    fun onStrokeMoveBatch(newPoints: List<StrokePoint>) {
+        if (newPoints.isEmpty()) return
+        _activeStroke.update { it + newPoints }
+    }
+
+    /**
+     * 手指抬起：完成笔画，写入页面，压入 Undo 栈。
+     * @param finalX 最终触摸 X（归一化），强制追加以绕过距离过滤，确保提交笔画与 FrontBuffer 末端一致
+     * @param finalY 最终触摸 Y（归一化）
+     * @param finalPressure 最终压感
+     */
+    fun onStrokeEnd(finalX: Float = Float.NaN, finalY: Float = Float.NaN, finalPressure: Float = 1.0f) {
+        var points = _activeStroke.value
+        // 强制追加最后一个触摸点（无论距离过滤），避免提交笔画尾部比 FrontBuffer 短
+        if (!finalX.isNaN() && !finalY.isNaN()) {
+            val last = points.lastOrNull()
+            if (last == null || last.x != finalX || last.y != finalY) {
+                points = points + StrokePoint(finalX, finalY, finalPressure)
+            }
+        }
         if (points.size < 2) {
             // 点击（无位移）：添加一个圆点笔画
             if (points.isEmpty()) return

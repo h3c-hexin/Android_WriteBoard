@@ -1,10 +1,12 @@
 package com.paintboard.ui.canvas
 
 import android.graphics.Paint
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,32 +27,53 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.paintboard.domain.model.ActiveTool
 import com.paintboard.domain.model.PageBackground
+import com.paintboard.domain.model.StrokePoint
 import com.paintboard.domain.model.StrokeTool
 import kotlin.math.sqrt
 
 /**
  * 画布 Composable
  *
- * 渲染策略：直接每帧绘制全部笔画，无 Bitmap 缓存，无闪烁。
+ * 渲染策略（书写流畅度优化后）：
+ *   - 已提交笔画：路径缓存（PathCache），避免每帧重建 Path 对象
+ *   - 活跃笔画（API 29+）：由 FrontBufferStrokeView 渲染，绕过 Vsync
+ *   - 活跃笔画（API < 29）：Compose 画布实时绘制 + StrokePredictor 预测延伸
+ *   - 触摸采样：读取 PointerInputChange.historical 补全帧间中间点
  *
  * 触摸路由优先级：
- *   1. 显式橡皮模式（工具栏橡皮按钮激活）→ 全部触点擦除
+ *   1. 显式橡皮模式 → 擦除
  *   2. 触控笔橡皮端（PointerType.Eraser）→ 擦除
- *   3. PAD 模式下手指触摸（PointerType.Touch）→ 擦除
+ *   3. PAD 模式手指触摸 → 擦除
  *   4. 其余 → 书写
+ *
+ * FrontBuffer 接入通过三个回调传入，默认 null 表示使用 Compose 渲染路径（兼容 API < 29）：
+ *   onFrontBufferStrokeStart  — 手势开始，传入颜色和线宽
+ *   onFrontBufferStrokePoints — 移动中，传入当前全量点列表 + 画布尺寸
+ *   onFrontBufferStrokeDone   — 手势结束，通知清空前端缓冲
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun DrawingCanvas(
     modifier: Modifier = Modifier,
-    viewModel: CanvasViewModel = hiltViewModel()
+    viewModel: CanvasViewModel = hiltViewModel(),
+    onFrontBufferStrokeStart: ((color: Int, widthPx: Float) -> Unit)? = null,
+    onFrontBufferStrokePoints: ((points: List<StrokePoint>, wPx: Float, hPx: Float) -> Unit)? = null,
+    onFrontBufferStrokeDone: (() -> Unit)? = null
 ) {
+    val hasFrontBuffer = onFrontBufferStrokePoints != null
+
     val page            by viewModel.page.collectAsState()
     val toolState       by viewModel.toolState.collectAsState()
-    val activeStroke    by viewModel.activeStroke.collectAsState()
     val eraserCursor    by viewModel.eraserCursor.collectAsState()
     val activeShapeDrag by viewModel.activeShapeDrag.collectAsState()
 
-    // PAD 模式检测：屏幕对角线 < 20 英寸视为 PAD
+    // FrontBuffer 激活时不订阅 activeStroke（避免每次触摸都触发 DrawingCanvas 重组）
+    val activeStroke by if (!hasFrontBuffer) {
+        viewModel.activeStroke.collectAsState()
+    } else {
+        remember { mutableStateOf(emptyList()) }
+    }
+
     val context = LocalContext.current
     val isPadMode = remember {
         val dm = context.resources.displayMetrics
@@ -60,6 +83,18 @@ fun DrawingCanvas(
     }
 
     var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    val predictor = remember { StrokePredictor() }
+
+    // 路径缓存：key = stroke.id，避免每帧重建 Path
+    val pathCache = remember { HashMap<String, android.graphics.Path>() }
+
+    // 笔画删除时清理缓存（擦除、Undo）
+    LaunchedEffect(page.strokes) {
+        val currentIds = page.strokes.mapTo(HashSet()) { it.id }
+        pathCache.keys.retainAll(currentIds)
+    }
+    // 画布尺寸变化时清空缓存（路径以像素为单位，尺寸变化后需重建）
+    LaunchedEffect(canvasSize) { pathCache.clear() }
 
     androidx.compose.foundation.Canvas(
         modifier = modifier
@@ -72,12 +107,10 @@ fun DrawingCanvas(
                     val h = canvasSize.height.toFloat()
                     if (w <= 0f || h <= 0f) return@awaitEachGesture
 
-                    // 读取手势开始时的工具状态（快照，避免手势中途切换工具导致不一致）
                     val tState = toolState
                     val nx = down.position.x / w
                     val ny = down.position.y / h
 
-                    // 判断本次手势类型
                     val isErase = when {
                         tState.activeTool == ActiveTool.ERASER      -> true
                         down.type == PointerType.Eraser              -> true
@@ -85,25 +118,27 @@ fun DrawingCanvas(
                         else -> false
                     }
                     val isShape = tState.activeTool == ActiveTool.SHAPE && !isErase
-
                     val radiusFraction = tState.eraserSize.fraction
                     val aspectRatio = if (w > 0f) h / w else 1f
 
                     when {
                         isErase -> {
-                            // ===== 橡皮擦手势 =====
+                            // ===== 橡皮擦手势（不变）=====
                             viewModel.onEraserBegin(nx, ny, radiusFraction, aspectRatio)
                             do {
                                 val event = awaitPointerEvent()
                                 val change = event.changes.firstOrNull() ?: break
                                 if (change.pressed) {
-                                    viewModel.onEraserMove(change.position.x / w, change.position.y / h, radiusFraction, aspectRatio)
+                                    viewModel.onEraserMove(
+                                        change.position.x / w, change.position.y / h,
+                                        radiusFraction, aspectRatio
+                                    )
                                     change.consume()
                                 } else { viewModel.onEraserEnd(); break }
                             } while (true)
                         }
                         isShape -> {
-                            // ===== 图形拖拽手势 =====
+                            // ===== 图形拖拽手势（不变）=====
                             viewModel.onShapeBegin(nx, ny)
                             do {
                                 val event = awaitPointerEvent()
@@ -115,15 +150,51 @@ fun DrawingCanvas(
                             } while (true)
                         }
                         else -> {
-                            // ===== 书写手势 =====
+                            // ===== 书写手势（优化：历史点 + FrontBuffer）=====
+                            predictor.reset()
+                            predictor.addPoint(nx, ny, down.pressure, down.uptimeMillis)
                             viewModel.onStrokeBegin(nx, ny, down.pressure)
+                            // 通知 FrontBuffer 新笔画开始
+                            onFrontBufferStrokeStart?.invoke(
+                                tState.currentColor,
+                                tState.strokeWidth.fraction * w
+                            )
+                            // 本次手势的全量点（供 FrontBuffer 做增量渲染）
+                            val allPoints = mutableListOf(StrokePoint(nx, ny, down.pressure))
+                            var lastX = nx; var lastY = ny; var lastPressure = down.pressure
+
                             do {
                                 val event = awaitPointerEvent()
                                 val change = event.changes.firstOrNull() ?: break
                                 if (change.pressed) {
-                                    viewModel.onStrokeMove(change.position.x / w, change.position.y / h, change.pressure)
+                                    // ① 历史点 + 当前点：批量收集，一次性写入 ViewModel（减少 GC 压力）
+                                    val batch = mutableListOf<StrokePoint>()
+                                    change.historical.forEach { hist ->
+                                        val hx = hist.position.x / w
+                                        val hy = hist.position.y / h
+                                        predictor.addPoint(hx, hy, change.pressure, hist.uptimeMillis)
+                                        batch.add(StrokePoint(hx, hy, change.pressure))
+                                    }
+                                    val cx = change.position.x / w
+                                    val cy = change.position.y / h
+                                    predictor.addPoint(cx, cy, change.pressure, change.uptimeMillis)
+                                    batch.add(StrokePoint(cx, cy, change.pressure))
+                                    lastX = cx; lastY = cy; lastPressure = change.pressure
+
+                                    allPoints.addAll(batch)
+                                    viewModel.onStrokeMoveBatch(batch)
+
+                                    // ② FrontBuffer 渲染（低延迟路径）
+                                    onFrontBufferStrokePoints?.invoke(allPoints, w, h)
+
                                     change.consume()
-                                } else { viewModel.onStrokeEnd(); break }
+                                } else {
+                                    // 手势结束
+                                    onFrontBufferStrokeDone?.invoke()
+                                    viewModel.onStrokeEnd(lastX, lastY, lastPressure)
+                                    predictor.reset()
+                                    break
+                                }
                             } while (true)
                         }
                     }
@@ -134,12 +205,13 @@ fun DrawingCanvas(
         val h = size.height
         if (w <= 0f || h <= 0f) return@Canvas
 
-        // ─── 0. 页面背景（网格 / 横线）───
         drawIntoCanvas { composeCanvas ->
             val canvas = composeCanvas.nativeCanvas
+
+            // ─── 0. 页面背景 ───
             when (page.background) {
                 PageBackground.GRID -> {
-                    val step = w / 25f   // 约 25 列网格
+                    val step = w / 25f
                     val gridPaint = android.graphics.Paint().apply {
                         color = android.graphics.Color.argb(60, 66, 66, 66)
                         strokeWidth = 1f
@@ -151,7 +223,7 @@ fun DrawingCanvas(
                     while (y < h) { canvas.drawLine(0f, y, w, y, gridPaint); y += step }
                 }
                 PageBackground.LINES -> {
-                    val step = h / 18f   // 约 18 行横线
+                    val step = h / 18f
                     val linePaint = android.graphics.Paint().apply {
                         color = android.graphics.Color.argb(60, 97, 97, 97)
                         strokeWidth = 1f
@@ -162,14 +234,13 @@ fun DrawingCanvas(
                 }
                 PageBackground.BLANK -> Unit
             }
-        }
 
-        // ─── 1. 所有已完成笔画 + 图形 ───
-        drawIntoCanvas { composeCanvas ->
-            val canvas = composeCanvas.nativeCanvas
+            // ─── 1. 已提交笔画（路径缓存，避免每帧重建 Path）───
             page.strokes.forEach { stroke ->
-                if (stroke.tool == StrokeTool.SHAPE && stroke.shapeType != null && stroke.points.size >= 2) {
-                    // 图形笔画：用 ShapeRenderer 绘制
+                if (stroke.tool == StrokeTool.SHAPE
+                    && stroke.shapeType != null
+                    && stroke.points.size >= 2
+                ) {
                     ShapeRenderer.drawShape(
                         canvas, stroke.shapeType,
                         stroke.points[0].x, stroke.points[0].y,
@@ -178,21 +249,24 @@ fun DrawingCanvas(
                         buildPaint(stroke.color, stroke.width * w)
                     )
                 } else {
-                    // 普通笔画：Catmull-Rom 贝塞尔
-                    canvas.drawPath(
-                        StrokeRenderer.buildPath(stroke.points, w, h),
-                        buildPaint(stroke.color, stroke.width * w)
-                    )
+                    val path = pathCache.getOrPut(stroke.id) {
+                        StrokeRenderer.buildPath(stroke.points, w, h)
+                    }
+                    canvas.drawPath(path, buildPaint(stroke.color, stroke.width * w))
                 }
             }
-            // ─── 2. 当前正在书写的笔画（实时）───
+
+            // ─── 2. 活跃笔画（API < 29 / 无 FrontBuffer 时在 Compose 层渲染）───
+            //     FrontBuffer 激活时 activeStroke 始终为空，此块自动跳过
             if (activeStroke.isNotEmpty()) {
+                val displayed = activeStroke + predictor.predictedPoints()
                 canvas.drawPath(
-                    StrokeRenderer.buildPath(activeStroke, w, h),
+                    StrokeRenderer.buildPath(displayed, w, h),
                     buildPaint(toolState.currentColor, toolState.strokeWidth.fraction * w)
                 )
             }
-            // ─── 3. 正在拖拽的图形预览（虚线 + 50% 透明）───
+
+            // ─── 3. 图形拖拽预览（虚线 + 50% 透明）───
             activeShapeDrag?.let { drag ->
                 ShapeRenderer.drawShape(
                     canvas, toolState.selectedShape,
@@ -205,27 +279,24 @@ fun DrawingCanvas(
             }
         }
 
-        // ─── 3. 橡皮擦光标（白色圆圈，显示擦除范围）───
+        // ─── 4. 橡皮擦光标 ───
         eraserCursor?.let { (ex, ey) ->
-            val r = toolState.eraserSize.fraction * w
+            val r = toolState.eraserSize.fraction * size.width
             drawCircle(
                 color = Color.White.copy(alpha = 0.75f),
                 radius = r,
-                center = Offset(ex * w, ey * h),
+                center = Offset(ex * size.width, ey * size.height),
                 style = Stroke(width = 2.dp.toPx())
             )
         }
     }
 }
 
-/** 构建画笔 Paint */
-private fun buildPaint(color: Int, widthPx: Float): Paint {
-    return Paint().apply {
-        this.color = color
-        this.strokeWidth = widthPx.coerceAtLeast(3f)
-        this.style = Paint.Style.STROKE
-        this.strokeCap = Paint.Cap.ROUND
-        this.strokeJoin = Paint.Join.ROUND
-        this.isAntiAlias = true
-    }
+private fun buildPaint(color: Int, widthPx: Float): Paint = Paint().apply {
+    this.color = color
+    strokeWidth = widthPx.coerceAtLeast(3f)
+    style = Paint.Style.STROKE
+    strokeCap = Paint.Cap.ROUND
+    strokeJoin = Paint.Join.ROUND
+    isAntiAlias = true
 }

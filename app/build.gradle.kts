@@ -87,4 +87,8 @@ dependencies {
     // ML Kit 图形自动矫正（模块 7 实现时添加）
     // implementation(libs.mlkit.digitalink)
     implementation(libs.kotlinx.serialization.json)
+
+    // 书写流畅度优化
+    implementation(libs.graphics.core)   // GLFrontBufferedRenderer（API 31+）
+    implementation(libs.ink.strokes)     // Ink Stroke Modeler
 }

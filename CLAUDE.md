@@ -8,12 +8,6 @@
 - 坐标系：归一化 [0.0, 1.0]，x/y 均为画布宽度比例
 - 文件格式：`.pb` = JSON（kotlinx.serialization），内部自动存盘路径 `filesDir/autosave.pb`
 
-## 工具栏二级子面板 §0 规则（所有弹出面板必须遵守）
-- 实现：Compose `Popup`
-- 垂直定位：`y = windowSize.height - toolbarHeightPx(72dp) - popupContentSize.height`
-- 水平定位：`x` 居中于锚点按钮，`coerceIn(8, windowWidth - popupWidth - 8)`
-- Popup 必须放在触发按钮 Box **内部**（`anchorBounds` 才能拿到正确坐标）
-
 ## 关键包路径
 - `domain/model/`    数据模型（DrawingPage, Stroke, StrokeTool, ShapeType…）
 - `ui/canvas/`       CanvasViewModel, DrawingCanvas
