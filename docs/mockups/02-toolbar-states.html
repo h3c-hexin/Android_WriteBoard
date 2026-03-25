@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>02 · 工具栏状态展示 — PaintBoard 效果图</title>
+  <style>
+    /* ===================================================================
+       02-toolbar-states.html
+       并排展示工具栏的四种状态：
+       1. 默认（画笔激活，中等粗细，黑色选中）
+       2. 橡皮擦激活（粗细区禁用）
+       3. 图形工具激活（矩形选中）
+       4. 撤销可用 vs 撤销禁用对比
+       =================================================================== */
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --canvas-bg:        #1E1E1E;
+      --toolbar-bg:       rgba(44,44,44,0.97);
+      --toolbar-border:   #424242;
+      --toolbar-divider:  #3A3A3A;
+      --active-color:     #90CAF9;
+      --text-primary:     #FFFFFF;
+      --text-secondary:   #BDBDBD;
+      --icon-default:     #9E9E9E;
+      --icon-disabled:    #616161;
+      --surface:          #2D2D2D;
+    }
+
+    body {
+      background: #121212;
+      color: var(--text-primary);
+      font-family: "Roboto", sans-serif;
+      padding: 24px 32px 48px;
+      min-height: 100vh;
+    }
+
+    /* 效果图顶部导航 */
+    .nav-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 32px;
+      font-size: 14px;
+      color: #666;
+    }
+    .nav-bar a { color: #90CAF9; text-decoration: none; }
+    .nav-bar a:hover { text-decoration: underline; }
+
+    /* 页面标题 */
+    .page-title {
+      font-size: 28px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+    .page-subtitle {
+      font-size: 16px;
+      color: var(--text-secondary);
+      margin-bottom: 40px;
+    }
+
+    /* 状态区块 */
+    .state-block {
+      margin-bottom: 40px;
+    }
+
+    .state-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: #90CAF9;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 10px;
+    }
+
+    .state-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+
+    .state-desc {
+      font-size: 15px;
+      color: var(--text-secondary);
+      margin-bottom: 14px;
+      line-height: 1.5;
+    }
+
+    /* ── 工具栏容器（完整宽度展示） ── */
+    .toolbar-wrapper {
+      background: #1E1E1E;
+      border-radius: 8px;
+      padding: 8px 0 0;
+      overflow: hidden;
+    }
+
+    /* ── 工具栏本体 ── */
+    .toolbar {
+      height: 72px;
+      background: var(--toolbar-bg);
+      border-top: 1px solid var(--toolbar-border);
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -2px 8px rgba(0,0,0,0.40), 0 -1px 3px rgba(0,0,0,0.25);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+    }
+
+    .toolbar-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px;
+    }
+
+    .toolbar-divider {
+      width: 1px;
+      height: 32px;
+      background: var(--toolbar-divider);
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    /* 通用图标按钮 64×64 */
+    .tool-btn {
+      width: 64px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+
+    .icon-inner {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* 普通 */
+    .tool-btn .icon-inner svg { stroke: var(--icon-default); fill: none; }
+
+    /* 激活 */
+    .tool-btn.active .icon-inner { background: var(--active-color); }
+    .tool-btn.active .icon-inner svg { stroke: #003C8F; fill: none; }
+
+    /* 禁用 */
+    .tool-btn.disabled .icon-inner svg { stroke: var(--icon-disabled) !important; fill: none; }
+
+    /* 颜色圆圈按钮（普通） */
+    .color-chip {
+      width: 64px; height: 64px;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+    }
+    .chip-circle {
+      width: 36px; height: 36px; border-radius: 50%;
+    }
+    .chip-black  { background:#212121; box-shadow:0 0 0 1px rgba(255,255,255,0.4); }
+    .chip-red    { background:#E53935; }
+    .chip-blue   { background:#1E88E5; }
+    .chip-green  { background:#43A047; }
+
+    /* 选中状态 */
+    .color-chip.selected .chip-circle {
+      box-shadow: 0 0 0 2px #1E1E1E, 0 0 0 5px #FFFFFF;
+    }
+    .color-chip.selected .chip-circle.chip-black {
+      box-shadow: 0 0 0 2px #1E1E1E, 0 0 0 5px #FFFFFF;
+    }
+
+    /* 颜色圆禁用 */
+    .color-chip.disabled .chip-circle {
+      opacity: 0.35;
+    }
+
+    /* 页面管理 */
+    .page-nav {
+      display: flex; align-items: center; gap: 4px; padding: 0 8px;
+    }
+    .nav-btn {
+      width: 48px; height: 48px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .nav-btn svg { stroke: var(--icon-default); fill:none; }
+    .page-label {
+      min-width:64px; height:48px;
+      display:flex; align-items:center; justify-content:center;
+      font-size:18px; font-weight:600; color:var(--text-primary);
+    }
+    .add-page-btn {
+      width:48px; height:48px;
+      display:flex; align-items:center; justify-content:center;
+    }
+    .add-page-btn svg { stroke:var(--icon-default); fill:none; }
+
+    /* ── 对比区域（左右两列） ── */
+    .compare-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .compare-item .compare-sub-label {
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 8px;
+    }
+
+    /* 仅展示 D 区的小工具栏 */
+    .mini-toolbar {
+      height: 72px;
+      background: var(--toolbar-bg);
+      border-top: 1px solid var(--toolbar-border);
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -2px 8px rgba(0,0,0,0.40);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 0;
+      width: fit-content;
+    }
+
+    /* 标注徽章 */
+    .badge {
+      display: inline-block;
+      background: rgba(144,202,249,0.15);
+      border: 1px solid rgba(144,202,249,0.3);
+      color: #90CAF9;
+      font-size: 12px;
+      padding: 2px 10px;
+      border-radius: 100px;
+      margin-left: 10px;
+      vertical-align: middle;
+    }
+    .badge-warn {
+      background: rgba(239,154,154,0.15);
+      border-color: rgba(239,154,154,0.3);
+      color: #EF9A9A;
+    }
+
+    /* 图形工具——矩形图标 */
+    .icon-rect { stroke: #003C8F; }
+
+    /* 橡皮擦激活时 B 区整体变暗 */
+    .eraser-mode .stroke-section .tool-btn .icon-inner svg {
+      stroke: var(--icon-disabled) !important;
+    }
+
+    /* 分隔线 */
+    .section-sep {
+      border: none;
+      border-top: 1px solid #2a2a2a;
+      margin: 36px 0;
+    }
+
+  </style>
+</head>
+<body>
+
+<!-- 效果图导航 -->
+<div class="nav-bar">
+  <a href="index.html">← 返回导航</a>
+  <span style="color:#444;">/</span>
+  <span style="color:#ccc;">02 · 工具栏状态展示</span>
+</div>
+
+<h1 class="page-title">工具栏状态展示</h1>
+<p class="page-subtitle">并排对比工具栏四种核心状态，展示激活/禁用/默认的视觉差异</p>
+
+
+<!-- ══════════════════════════════════════════════════════════
+     状态 1：默认（画笔激活，中等粗细，黑色选中）
+     ══════════════════════════════════════════════════════════ -->
+<div class="state-block">
+  <div class="state-label">状态 01</div>
+  <div class="state-title">默认状态 — 画笔工具激活 <span class="badge">App 启动默认</span></div>
+  <div class="state-desc">
+    A区：画笔高亮（蓝色底） &nbsp;·&nbsp; B区：中等粗细激活 &nbsp;·&nbsp; C区：黑色快捷色选中（白色外环）&nbsp;·&nbsp; D区：撤销/重做均可用
+  </div>
+  <div class="toolbar-wrapper">
+    <div class="toolbar">
+
+      <!-- A 区 绘图工具（画笔激活） -->
+      <div class="toolbar-section">
+        <!-- 画笔 激活 -->
+        <div class="tool-btn active" title="画笔（激活）">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/>
+              <path d="M20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+            </svg>
+          </div>
+        </div>
+        <!-- 橡皮 普通 -->
+        <div class="tool-btn" title="橡皮擦">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <path d="M20 20H7L3 16l10.5-10.5a2 2 0 012.83 0l4.24 4.24a2 2 0 010 2.83L14 19"/>
+              <line x1="6" y1="20" x2="20" y2="20"/>
+            </svg>
+          </div>
+        </div>
+        <!-- 图形 普通 -->
+        <div class="tool-btn" title="图形工具">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <polygon points="12,3 3,21 21,21"/>
+            </svg>
+          </div>
+        </div>
+        <!-- 便利贴 禁用 -->
+        <div class="tool-btn disabled" title="便利贴（v1.5 占位）">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h7l5-5V4a2 2 0 00-2-2z"/>
+              <polyline points="14,2 14,8 20,8"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- B 区 粗细（中等激活） -->
+      <div class="toolbar-section">
+        <div class="tool-btn" title="细">
+          <div class="icon-inner">
+            <svg width="32" height="14" viewBox="0 0 32 14">
+              <line x1="4" y1="7" x2="28" y2="7" stroke="#9E9E9E" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn active" title="中（激活）">
+          <div class="icon-inner">
+            <svg width="32" height="14" viewBox="0 0 32 14">
+              <line x1="4" y1="7" x2="28" y2="7" stroke="#003C8F" stroke-width="4" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn" title="粗">
+          <div class="icon-inner">
+            <svg width="32" height="14" viewBox="0 0 32 14">
+              <line x1="4" y1="7" x2="28" y2="7" stroke="#9E9E9E" stroke-width="8" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- C 区 颜色（黑色选中） -->
+      <div class="toolbar-section">
+        <div class="color-chip selected" title="黑色（选中）"><div class="chip-circle chip-black"></div></div>
+        <div class="color-chip"><div class="chip-circle chip-red"></div></div>
+        <div class="color-chip"><div class="chip-circle chip-blue"></div></div>
+        <div class="color-chip"><div class="chip-circle chip-green"></div></div>
+        <div class="tool-btn" title="调色盘">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <circle cx="12" cy="8" r="1.5" fill="#E53935" stroke="none"/>
+              <circle cx="15.5" cy="11" r="1.5" fill="#FB8C00" stroke="none"/>
+              <circle cx="15.5" cy="15" r="1.5" fill="#43A047" stroke="none"/>
+              <circle cx="12" cy="17" r="1.5" fill="#1E88E5" stroke="none"/>
+              <circle cx="8.5" cy="15" r="1.5" fill="#8E24AA" stroke="none"/>
+              <circle cx="8.5" cy="11" r="1.5" fill="#9E9E9E" stroke="none"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- D 区 撤销/重做（可用） -->
+      <div class="toolbar-section">
+        <div class="tool-btn" title="撤销（可用）">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none">
+              <path d="M3 7v6h6"/>
+              <path d="M3 13C5.4 7.9 11 4 17 5.1A9 9 0 0121 13"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn" title="重做（可用）">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none">
+              <path d="M21 7v6h-6"/>
+              <path d="M21 13A9 9 0 007 5.1C5 6.4 3.5 8.6 3 11"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- E 区 功能 -->
+      <div class="toolbar-section">
+        <div class="tool-btn" title="协同">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none">
+              <circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="2"/>
+              <path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 9c1.7 0 4 1.3 4 4"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn" title="分享">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none">
+              <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+              <rect x="3" y="14" width="7" height="7"/>
+              <rect x="5" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/>
+              <rect x="16" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/>
+              <rect x="5" y="16" width="3" height="3" fill="#9E9E9E" stroke="none"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn" title="更多">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24">
+              <circle cx="12" cy="5" r="1.5" fill="#9E9E9E"/>
+              <circle cx="12" cy="12" r="1.5" fill="#9E9E9E"/>
+              <circle cx="12" cy="19" r="1.5" fill="#9E9E9E"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- F 区 页面管理 -->
+      <div class="page-nav">
+        <div class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="15,6 9,12 15,18"/></svg></div>
+        <div class="page-label">1/3</div>
+        <div class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="9,6 15,12 9,18"/></svg></div>
+        <div class="add-page-btn"><svg width="18" height="18" viewBox="0 0 24 24" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+      </div>
+
+    </div><!-- /toolbar -->
+  </div>
+</div>
+
+<hr class="section-sep">
+
+<!-- ══════════════════════════════════════════════════════════
+     状态 2：橡皮擦激活（B区粗细禁用，C区颜色无意义）
+     ══════════════════════════════════════════════════════════ -->
+<div class="state-block">
+  <div class="state-label">状态 02</div>
+  <div class="state-title">橡皮擦激活 <span class="badge">B 区粗细禁用</span></div>
+  <div class="state-desc">
+    橡皮擦激活时，笔画粗细（B区）对橡皮无意义，整个 B区显示禁用态（图标变暗，触摸无反馈）
+  </div>
+  <div class="toolbar-wrapper">
+    <div class="toolbar">
+
+      <!-- A 区（橡皮激活） -->
+      <div class="toolbar-section">
+        <div class="tool-btn" title="画笔">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/>
+              <path d="M20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+            </svg>
+          </div>
+        </div>
+        <!-- 橡皮 激活 -->
+        <div class="tool-btn active" title="橡皮（激活）">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <path d="M20 20H7L3 16l10.5-10.5a2 2 0 012.83 0l4.24 4.24a2 2 0 010 2.83L14 19"/>
+              <line x1="6" y1="20" x2="20" y2="20"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn" title="图形工具">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <polygon points="12,3 3,21 21,21"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn disabled" title="便利贴">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h7l5-5V4a2 2 0 00-2-2z"/>
+              <polyline points="14,2 14,8 20,8"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- B 区（全部禁用） -->
+      <div class="toolbar-section">
+        <div class="tool-btn disabled" title="细（禁用）">
+          <div class="icon-inner">
+            <svg width="32" height="14" viewBox="0 0 32 14">
+              <line x1="4" y1="7" x2="28" y2="7" stroke="#616161" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn disabled" title="中（禁用）">
+          <div class="icon-inner">
+            <svg width="32" height="14" viewBox="0 0 32 14">
+              <line x1="4" y1="7" x2="28" y2="7" stroke="#616161" stroke-width="4" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn disabled" title="粗（禁用）">
+          <div class="icon-inner">
+            <svg width="32" height="14" viewBox="0 0 32 14">
+              <line x1="4" y1="7" x2="28" y2="7" stroke="#616161" stroke-width="8" stroke-linecap="round"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- C 区（颜色正常显示但无实际效果，黑色仍选中） -->
+      <div class="toolbar-section">
+        <div class="color-chip selected" title="黑色"><div class="chip-circle chip-black"></div></div>
+        <div class="color-chip"><div class="chip-circle chip-red"></div></div>
+        <div class="color-chip"><div class="chip-circle chip-blue"></div></div>
+        <div class="color-chip"><div class="chip-circle chip-green"></div></div>
+        <div class="tool-btn" title="调色盘">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <circle cx="12" cy="8" r="1.5" fill="#E53935" stroke="none"/>
+              <circle cx="15.5" cy="11" r="1.5" fill="#FB8C00" stroke="none"/>
+              <circle cx="15.5" cy="15" r="1.5" fill="#43A047" stroke="none"/>
+              <circle cx="12" cy="17" r="1.5" fill="#1E88E5" stroke="none"/>
+              <circle cx="8.5" cy="15" r="1.5" fill="#8E24AA" stroke="none"/>
+              <circle cx="8.5" cy="11" r="1.5" fill="#9E9E9E" stroke="none"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- D 区（撤销可用） -->
+      <div class="toolbar-section">
+        <div class="tool-btn" title="撤销">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none">
+              <path d="M3 7v6h6"/><path d="M3 13C5.4 7.9 11 4 17 5.1A9 9 0 0121 13"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn" title="重做">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none">
+              <path d="M21 7v6h-6"/><path d="M21 13A9 9 0 007 5.1C5 6.4 3.5 8.6 3 11"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- E 区 -->
+      <div class="toolbar-section">
+        <div class="tool-btn" title="协同"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="2"/><path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 9c1.7 0 4 1.3 4 4"/></svg></div></div>
+        <div class="tool-btn" title="分享"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="5" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/><rect x="16" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/><rect x="5" y="16" width="3" height="3" fill="#9E9E9E" stroke="none"/></svg></div></div>
+        <div class="tool-btn" title="更多"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="#9E9E9E"/><circle cx="12" cy="12" r="1.5" fill="#9E9E9E"/><circle cx="12" cy="19" r="1.5" fill="#9E9E9E"/></svg></div></div>
+      </div>
+      <div class="toolbar-divider"></div>
+      <div class="page-nav">
+        <div class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="15,6 9,12 15,18"/></svg></div>
+        <div class="page-label">2/3</div>
+        <div class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="9,6 15,12 9,18"/></svg></div>
+        <div class="add-page-btn"><svg width="18" height="18" viewBox="0 0 24 24" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="section-sep">
+
+<!-- ══════════════════════════════════════════════════════════
+     状态 3：图形工具激活（矩形已选中，图标变为矩形）
+     ══════════════════════════════════════════════════════════ -->
+<div class="state-block">
+  <div class="state-label">状态 03</div>
+  <div class="state-title">图形工具激活 — 矩形已选中 <span class="badge">图标跟随图形更新</span></div>
+  <div class="state-desc">
+    A区图形工具激活，图标已更新为矩形；B区粗细正常可用（粗线已激活）；颜色区蓝色选中
+  </div>
+  <div class="toolbar-wrapper">
+    <div class="toolbar">
+
+      <!-- A 区（图形激活，图标=矩形） -->
+      <div class="toolbar-section">
+        <div class="tool-btn" title="画笔"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/><path d="M20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></div></div>
+        <div class="tool-btn" title="橡皮"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2"><path d="M20 20H7L3 16l10.5-10.5a2 2 0 012.83 0l4.24 4.24a2 2 0 010 2.83L14 19"/><line x1="6" y1="20" x2="20" y2="20"/></svg></div></div>
+        <!-- 图形工具 激活，图标=矩形 -->
+        <div class="tool-btn active" title="图形（矩形，激活）">
+          <div class="icon-inner">
+            <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2">
+              <rect x="3" y="5" width="18" height="14" rx="2" stroke="#003C8F" fill="none"/>
+            </svg>
+          </div>
+        </div>
+        <div class="tool-btn disabled" title="便利贴"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h7l5-5V4a2 2 0 00-2-2z"/><polyline points="14,2 14,8 20,8"/></svg></div></div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- B 区（粗线激活） -->
+      <div class="toolbar-section">
+        <div class="tool-btn" title="细"><div class="icon-inner"><svg width="32" height="14" viewBox="0 0 32 14"><line x1="4" y1="7" x2="28" y2="7" stroke="#9E9E9E" stroke-width="2" stroke-linecap="round"/></svg></div></div>
+        <div class="tool-btn" title="中"><div class="icon-inner"><svg width="32" height="14" viewBox="0 0 32 14"><line x1="4" y1="7" x2="28" y2="7" stroke="#9E9E9E" stroke-width="4" stroke-linecap="round"/></svg></div></div>
+        <div class="tool-btn active" title="粗（激活）"><div class="icon-inner"><svg width="32" height="14" viewBox="0 0 32 14"><line x1="4" y1="7" x2="28" y2="7" stroke="#003C8F" stroke-width="8" stroke-linecap="round"/></svg></div></div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- C 区（蓝色选中） -->
+      <div class="toolbar-section">
+        <div class="color-chip" title="黑色"><div class="chip-circle chip-black"></div></div>
+        <div class="color-chip" title="红色"><div class="chip-circle chip-red"></div></div>
+        <div class="color-chip selected" title="蓝色（选中）"><div class="chip-circle chip-blue"></div></div>
+        <div class="color-chip" title="绿色"><div class="chip-circle chip-green"></div></div>
+        <div class="tool-btn" title="调色盘"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="8" r="1.5" fill="#E53935" stroke="none"/><circle cx="15.5" cy="11" r="1.5" fill="#FB8C00" stroke="none"/><circle cx="15.5" cy="15" r="1.5" fill="#43A047" stroke="none"/><circle cx="12" cy="17" r="1.5" fill="#1E88E5" stroke="none"/><circle cx="8.5" cy="15" r="1.5" fill="#8E24AA" stroke="none"/><circle cx="8.5" cy="11" r="1.5" fill="#9E9E9E" stroke="none"/></svg></div></div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- D 区 -->
+      <div class="toolbar-section">
+        <div class="tool-btn" title="撤销"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none"><path d="M3 7v6h6"/><path d="M3 13C5.4 7.9 11 4 17 5.1A9 9 0 0121 13"/></svg></div></div>
+        <div class="tool-btn" title="重做"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none"><path d="M21 7v6h-6"/><path d="M21 13A9 9 0 007 5.1C5 6.4 3.5 8.6 3 11"/></svg></div></div>
+      </div>
+      <div class="toolbar-divider"></div>
+
+      <!-- E 区 -->
+      <div class="toolbar-section">
+        <div class="tool-btn" title="协同"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="2"/><path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 9c1.7 0 4 1.3 4 4"/></svg></div></div>
+        <div class="tool-btn" title="分享"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="5" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/><rect x="16" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/><rect x="5" y="16" width="3" height="3" fill="#9E9E9E" stroke="none"/></svg></div></div>
+        <div class="tool-btn" title="更多"><div class="icon-inner"><svg width="22" height="22" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="#9E9E9E"/><circle cx="12" cy="12" r="1.5" fill="#9E9E9E"/><circle cx="12" cy="19" r="1.5" fill="#9E9E9E"/></svg></div></div>
+      </div>
+      <div class="toolbar-divider"></div>
+      <div class="page-nav">
+        <div class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="15,6 9,12 15,18"/></svg></div>
+        <div class="page-label">1/3</div>
+        <div class="nav-btn"><svg width="18" height="18" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="9,6 15,12 9,18"/></svg></div>
+        <div class="add-page-btn"><svg width="18" height="18" viewBox="0 0 24 24" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<hr class="section-sep">
+
+<!-- ══════════════════════════════════════════════════════════
+     状态 4：撤销可用 vs 撤销禁用（D 区对比）
+     ══════════════════════════════════════════════════════════ -->
+<div class="state-block">
+  <div class="state-label">状态 04</div>
+  <div class="state-title">D 区：撤销可用 vs 撤销禁用对比</div>
+  <div class="state-desc">
+    左：撤销/重做均可用（正常图标色 #9E9E9E）&nbsp;·&nbsp; 右：撤销禁用（栈为空，图标变为 #616161，无触摸反馈）
+  </div>
+
+  <div class="compare-row">
+    <!-- 可用 -->
+    <div class="compare-item">
+      <div class="compare-sub-label">✓ 撤销可用（有历史记录）</div>
+      <div class="toolbar-wrapper">
+        <div class="mini-toolbar" style="width:100%;">
+          <!-- 撤销（可用） -->
+          <div class="toolbar-section">
+            <div class="tool-btn" title="撤销（可用）" style="position:relative;">
+              <div class="icon-inner">
+                <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none">
+                  <path d="M3 7v6h6"/><path d="M3 13C5.4 7.9 11 4 17 5.1A9 9 0 0121 13"/>
+                </svg>
+              </div>
+            </div>
+            <!-- 重做（禁用，无可重做内容） -->
+            <div class="tool-btn disabled" title="重做（禁用，无可重做内容）">
+              <div class="icon-inner">
+                <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none" style="stroke:#616161">
+                  <path d="M21 7v6h-6"/><path d="M21 13A9 9 0 007 5.1C5 6.4 3.5 8.6 3 11"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="toolbar-divider"></div>
+          <!-- 其他区占位 -->
+          <div class="toolbar-section" style="flex:1; justify-content:flex-end;">
+            <div style="font-size:14px; color:#555; padding:0 12px;">撤销：可用 · 重做：禁用（无历史）</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 禁用 -->
+    <div class="compare-item">
+      <div class="compare-sub-label" style="color:#EF9A9A;">✗ 撤销禁用（历史栈为空）</div>
+      <div class="toolbar-wrapper">
+        <div class="mini-toolbar" style="width:100%;">
+          <!-- 撤销（禁用） -->
+          <div class="toolbar-section">
+            <div class="tool-btn disabled" title="撤销（禁用，无历史）">
+              <div class="icon-inner">
+                <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none" style="stroke:#616161">
+                  <path d="M3 7v6h6"/><path d="M3 13C5.4 7.9 11 4 17 5.1A9 9 0 0121 13"/>
+                </svg>
+              </div>
+            </div>
+            <!-- 重做（禁用） -->
+            <div class="tool-btn disabled" title="重做（禁用）">
+              <div class="icon-inner">
+                <svg width="22" height="22" viewBox="0 0 24 24" stroke-width="2" fill="none" style="stroke:#616161">
+                  <path d="M21 7v6h-6"/><path d="M21 13A9 9 0 007 5.1C5 6.4 3.5 8.6 3 11"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          <div class="toolbar-divider"></div>
+          <div class="toolbar-section" style="flex:1; justify-content:flex-end;">
+            <div style="font-size:14px; color:#EF9A9A; padding:0 12px;">
+              撤销/重做：均禁用（新建白板状态）
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 颜色对比说明 -->
+  <div style="margin-top:16px; padding:14px 20px; background:#1a1a1a; border-radius:8px; border:1px solid #333; font-size:14px; color:#888;">
+    <strong style="color:#90CAF9;">图标色差值</strong>：
+    可用状态 <span style="color:#9E9E9E;">■ #9E9E9E</span> &nbsp;→&nbsp;
+    禁用状态 <span style="color:#616161;">■ #616161</span>
+    &nbsp;（color.icon.default → color.icon.disabled）&nbsp;·&nbsp; 过渡时长：100ms
+  </div>
+</div>
+
+</body>
+</html>

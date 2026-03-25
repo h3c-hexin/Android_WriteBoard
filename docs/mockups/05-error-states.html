@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>05 · 错误与提示状态 — PaintBoard 效果图</title>
+  <style>
+    /* ===================================================================
+       05-error-states.html
+       展示各类错误与提示组件：
+       1. Toast 示例（成功/失败/信息/警告四种）
+       2. 连接断开 Banner
+       3. 文件保存失败 Bottom Sheet（Error Sheet）
+       4. 崩溃恢复 Bottom Sheet
+       =================================================================== */
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --canvas-bg:       #1E1E1E;
+      --sheet-bg:        rgba(44,44,44,0.97);
+      --sheet-solid:     #2C2C2C;
+      --toolbar-border:  #424242;
+      --divider:         #3A3A3A;
+      --active-color:    #90CAF9;
+      --text-primary:    #FFFFFF;
+      --text-secondary:  #BDBDBD;
+      --icon-default:    #9E9E9E;
+      --icon-on-surface: #EEEEEE;
+      --error:           #EF9A9A;
+      --error-bg:        #B71C1C;
+      --success:         #A5D6A7;
+      --success-bg:      #1B5E20;
+      --warning:         #FFCC80;
+      --warning-bg:      #E65100;
+      --info-color:      #90CAF9;
+      --surface:         #2D2D2D;
+    }
+
+    body {
+      background: #0D0D0D;
+      color: var(--text-primary);
+      font-family: "Roboto", sans-serif;
+      padding: 24px 40px 60px;
+      min-height: 100vh;
+    }
+
+    .nav-bar {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 32px; font-size: 14px; color: #666;
+    }
+    .nav-bar a { color: #90CAF9; text-decoration: none; }
+    .nav-bar a:hover { text-decoration: underline; }
+
+    .page-title { font-size: 28px; font-weight: 600; margin-bottom: 8px; }
+    .page-subtitle { font-size: 16px; color: var(--text-secondary); margin-bottom: 40px; line-height: 1.5; }
+
+    /* 章节标题 */
+    .section-title {
+      font-size: 20px; font-weight: 600; color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+    .section-label {
+      font-size: 12px; font-weight: 700; color: #90CAF9;
+      letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;
+    }
+    .section-desc {
+      font-size: 15px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.5;
+    }
+
+    .section-sep {
+      border: none; border-top: 1px solid #222; margin: 40px 0;
+    }
+
+    /* ══════════════════════════════
+       Toast 组件
+       ══════════════════════════════ */
+    .toast-showcase {
+      display: flex; flex-direction: column; gap: 14px;
+      max-width: 700px;
+    }
+
+    /* Toast 基础 */
+    .toast {
+      display: inline-flex; align-items: center; gap: 10px;
+      padding: 0 24px;
+      height: 48px;
+      border-radius: 100px;
+      font-size: 18px; font-weight: 400;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      max-width: 560px;
+      white-space: nowrap;
+    }
+
+    .toast-icon { flex-shrink: 0; font-size: 18px; }
+
+    /* Toast 变体 */
+    .toast-success {
+      background: rgba(27,94,32,0.95);
+      color: var(--success);
+      border: 1px solid rgba(165,214,167,0.25);
+    }
+    .toast-error {
+      background: rgba(183,28,28,0.95);
+      color: var(--error);
+      border: 1px solid rgba(239,154,154,0.25);
+    }
+    .toast-warning {
+      background: rgba(230,81,0,0.95);
+      color: var(--warning);
+      border: 1px solid rgba(255,204,128,0.25);
+    }
+    .toast-info {
+      background: rgba(62,62,62,0.95);
+      color: var(--icon-on-surface);
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+
+    .toast-action {
+      margin-left: auto; padding-left: 16px;
+      font-size: 16px; font-weight: 600; color: inherit; opacity: 0.85;
+      cursor: pointer; text-decoration: underline; white-space: nowrap;
+    }
+
+    /* Toast 时间条（视觉提示自动消失） */
+    .toast-with-bar {
+      flex-direction: column; align-items: stretch; height: auto;
+      padding: 12px 24px 0; border-radius: 16px; gap: 0;
+    }
+    .toast-main-row { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; }
+    .toast-progress-bar {
+      height: 3px; border-radius: 100px;
+      background: rgba(255,255,255,0.15);
+      margin: 0 -4px 6px;
+      position: relative; overflow: hidden;
+    }
+    .toast-progress-fill {
+      position: absolute; top: 0; left: 0; bottom: 0;
+      width: 65%; border-radius: 100px;
+    }
+    .toast-success .toast-progress-fill { background: var(--success); }
+    .toast-error .toast-progress-fill { background: var(--error); }
+
+    /* Toast 上下文（在画布背景中展示） */
+    .toast-canvas-ctx {
+      background: #1E1E1E;
+      border-radius: 10px;
+      padding: 20px;
+      position: relative;
+      display: flex; flex-direction: column; align-items: flex-start; gap: 12px;
+      border: 1px solid #2A2A2A;
+    }
+    .toast-canvas-ctx .canvas-label {
+      font-size: 12px; color: #444; position: absolute; top: 8px; right: 12px;
+    }
+
+    /* ══════════════════════════════
+       Banner 组件
+       ══════════════════════════════ -->
+    .banner-showcase {
+      display: flex; flex-direction: column; gap: 12px;
+      max-width: 900px;
+    }
+
+    .banner-item {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .banner-label-sm { font-size: 13px; color: #666; }
+
+    /* Banner 主体 */
+    .banner {
+      height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      gap: 6px; font-size: 14px; font-weight: 500;
+      border-radius: 4px;
+      padding: 0 16px;
+    }
+    .banner-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+    .banner-connecting {
+      background: rgba(230,81,0,0.85);
+      color: var(--warning);
+    }
+    .banner-reconnecting {
+      background: rgba(183,28,28,0.88);
+      color: var(--error);
+    }
+    .banner-success-b {
+      background: rgba(27,94,32,0.88);
+      color: var(--success);
+    }
+    .banner-info-b {
+      background: rgba(21,101,192,0.88);
+      color: var(--info-color);
+    }
+
+    /* 重连 spinner */
+    .spinner-sm {
+      width: 12px; height: 12px;
+      border: 2px solid rgba(255,204,128,0.3);
+      border-top-color: var(--warning);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      flex-shrink: 0;
+    }
+    .spinner-err {
+      border: 2px solid rgba(239,154,154,0.3);
+      border-top-color: var(--error);
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ══════════════════════════════
+       Error Bottom Sheet
+       ══════════════════════════════ */
+    .error-sheet-showcase {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
+    }
+
+    .error-sheet-card {
+      background: #141414;
+      border: 1px solid #272727;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .error-sheet-header-bar {
+      padding: 12px 18px;
+      background: #161616;
+      border-bottom: 1px solid #222;
+      font-size: 13px; color: #666;
+    }
+
+    /* 画布背景模拟 */
+    .error-canvas-bg {
+      background: linear-gradient(to bottom, #1a1a1a 20%, rgba(0,0,0,0.6) 100%);
+      padding-top: 20px;
+    }
+
+    /* Error Bottom Sheet 主体 */
+    .error-sheet {
+      background: var(--sheet-solid);
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -4px 16px rgba(0,0,0,0.6);
+      padding: 0 24px 24px;
+    }
+
+    .drag-handle {
+      width: 40px; height: 4px;
+      background: #4A4A4A; border-radius: 100px;
+      margin: 12px auto 16px;
+    }
+
+    .error-sheet-title-row {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 12px;
+    }
+    .error-icon { font-size: 24px; }
+    .error-title { font-size: 22px; font-weight: 700; color: var(--error); }
+
+    .error-body {
+      font-size: 18px; color: var(--icon-on-surface); line-height: 1.5; margin-bottom: 20px;
+    }
+    .error-detail {
+      font-size: 14px; color: #777; margin-top: 6px; font-family: "Roboto Mono", monospace;
+    }
+
+    .error-btn-row {
+      display: flex; gap: 12px; justify-content: flex-end;
+    }
+
+    .btn {
+      padding: 12px 24px; border-radius: 8px;
+      font-size: 16px; font-weight: 600; cursor: pointer;
+    }
+    .btn-cancel {
+      background: #383838; color: var(--text-secondary);
+      border: 1px solid #4A4A4A;
+    }
+    .btn-primary {
+      background: var(--active-color); color: #003C8F;
+    }
+    .btn-danger {
+      background: rgba(239,154,154,0.2); color: var(--error);
+      border: 1px solid rgba(239,154,154,0.3);
+    }
+    .btn-warning {
+      background: rgba(255,204,128,0.2); color: var(--warning);
+      border: 1px solid rgba(255,204,128,0.3);
+    }
+
+    /* ══════════════════════════════
+       崩溃恢复 Bottom Sheet
+       ══════════════════════════════ */
+    .crash-sheet {
+      background: var(--sheet-solid);
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -4px 16px rgba(0,0,0,0.6);
+      padding: 0 24px 24px;
+      max-width: 700px;
+    }
+
+    .crash-icon-row {
+      display: flex; align-items: center; gap: 14px; margin-bottom: 14px;
+    }
+    .crash-icon-badge {
+      width: 52px; height: 52px; border-radius: 12px;
+      background: rgba(239,154,154,0.15);
+      border: 1px solid rgba(239,154,154,0.25);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 26px;
+    }
+    .crash-title { font-size: 22px; font-weight: 700; color: var(--error); }
+    .crash-sub { font-size: 16px; color: #888; margin-top: 4px; }
+
+    .crash-body { font-size: 18px; color: var(--icon-on-surface); line-height: 1.6; margin-bottom: 8px; }
+    .crash-note { font-size: 15px; color: var(--warning); margin-bottom: 20px; line-height: 1.5; }
+
+    .crash-file-info {
+      background: #383838; border-radius: 8px; padding: 12px 16px;
+      margin-bottom: 20px;
+      font-size: 16px; color: var(--text-primary);
+    }
+    .crash-file-info .file-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .crash-file-info .file-label { color: #888; }
+    .crash-file-info .file-val { color: var(--text-primary); font-weight: 500; }
+
+  </style>
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<div class="nav-bar">
+  <a href="index.html">← 返回导航</a>
+  <span style="color:#444;">/</span>
+  <span style="color:#ccc;">05 · 错误与提示状态</span>
+</div>
+
+<h1 class="page-title">错误与提示状态</h1>
+<p class="page-subtitle">三种错误提示形式：Toast（轻量）· Banner（持续状态）· Bottom Sheet（需用户决策）</p>
+
+
+<!-- ══════════════════════════════════════════════════════
+     第一章：Toast 示例
+     ══════════════════════════════════════════════════════ -->
+<div class="section-label">Section 01</div>
+<h2 class="section-title">Toast 通知</h2>
+<p class="section-desc">
+  屏幕底部短暂弹出，自动消失（2~3s）· 胶囊形圆角 · 不阻塞用户操作 · 显示在工具栏上方 16dp 处
+</p>
+
+<!-- Toast 在画布环境中展示 -->
+<div class="toast-canvas-ctx">
+  <span class="canvas-label">画布背景（深色模式）</span>
+
+  <!-- 成功 Toast -->
+  <div class="toast toast-success">
+    <span class="toast-icon">✓</span>
+    白板已保存至"会议记录_2026-03-23.pb"
+    <span class="toast-action">查看</span>
+  </div>
+
+  <!-- 失败 Toast -->
+  <div class="toast toast-error">
+    <span class="toast-icon">✕</span>
+    保存失败：存储空间不足（剩余 128MB）
+  </div>
+
+  <!-- 警告 Toast -->
+  <div class="toast toast-warning">
+    <span class="toast-icon">⚠</span>
+    便利贴功能即将推出，敬请期待
+  </div>
+
+  <!-- 信息 Toast -->
+  <div class="toast toast-info">
+    <span class="toast-icon">ℹ</span>
+    图形已自动矫正为标准矩形
+  </div>
+
+  <!-- 带进度条的 Toast（正在进行中） -->
+  <div class="toast toast-success toast-with-bar" style="width:440px;">
+    <div class="toast-main-row">
+      <span class="toast-icon">✓</span>
+      已导出 3 张 PNG 图片，正在生成 PDF...
+    </div>
+    <div class="toast-progress-bar">
+      <div class="toast-progress-fill"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- Toast 规格说明 -->
+<div style="margin-top:14px; padding:14px 20px; background:#141414; border:1px solid #222; border-radius:8px; font-size:14px; color:#777; line-height:1.8;">
+  <strong style="color:#90CAF9;">规格</strong>：
+  高度 48px（大屏）· 水平内边距 24px · 圆角 100%（胶囊形）·
+  背景 rgba(62,62,62,0.92)（默认信息类）·
+  正文字号 18sp · 持续时长：普通 2s / 重要 3s ·
+  入场动画 200ms（↑20px + fadeIn）· 退场 150ms（fadeOut）
+</div>
+
+
+<hr class="section-sep">
+
+<!-- ══════════════════════════════════════════════════════
+     第二章：Banner 示例
+     ══════════════════════════════════════════════════════ -->
+<div class="section-label">Section 02</div>
+<h2 class="section-title">连接状态 Banner</h2>
+<p class="section-desc">
+  画布顶部固定横条 · 高度 28px · 持续显示状态变化 · 不含交互按钮（除断线超限后）· 80% 透明度
+</p>
+
+<div class="banner-showcase">
+
+  <!-- 协同中（绿色） -->
+  <div class="banner-item">
+    <div class="banner-label-sm">协同进行中</div>
+    <div class="banner banner-success-b">
+      <div class="banner-dot" style="background:#A5D6A7;"></div>
+      协同中 · 3 人在线 · 房间码 A7K3XP
+    </div>
+  </div>
+
+  <!-- 正在连接（橙色） -->
+  <div class="banner-item">
+    <div class="banner-label-sm">正在连接（初次加入）</div>
+    <div class="banner banner-connecting">
+      <div class="spinner-sm" style="border:2px solid rgba(255,204,128,0.3);border-top-color:#FFCC80;"></div>
+      正在连接房间 A7K3XP...
+    </div>
+  </div>
+
+  <!-- 断线重连中（红色 + 旋转） -->
+  <div class="banner-item">
+    <div class="banner-label-sm">断线重连中（第 2/5 次）</div>
+    <div class="banner banner-reconnecting">
+      <div class="spinner-sm spinner-err"></div>
+      连接已断开，正在重连中（第 2/5 次尝试）...
+    </div>
+  </div>
+
+  <!-- 重连成功（短暂绿色，随后消失） -->
+  <div class="banner-item">
+    <div class="banner-label-sm">重连成功（显示 2s 后消失）</div>
+    <div class="banner banner-success-b">
+      <div class="banner-dot" style="background:#A5D6A7;"></div>
+      重连成功 · 已同步 5 条操作
+    </div>
+  </div>
+
+  <!-- 重连失败超限（红色 + 可点击） -->
+  <div class="banner-item">
+    <div class="banner-label-sm">重连彻底失败（超 5 次，Banner 可点击）</div>
+    <div class="banner banner-reconnecting" style="cursor:pointer; justify-content:center; gap:8px;">
+      <div class="banner-dot" style="background:#EF9A9A;"></div>
+      连接失败 · 已断开协同
+      <span style="text-decoration:underline; font-weight:600;">点击手动重连</span>
+    </div>
+  </div>
+
+  <!-- 信息型 Banner（锁定/只读） -->
+  <div class="banner-item">
+    <div class="banner-label-sm">主持人锁定白板（橙色警告）</div>
+    <div class="banner" style="background:rgba(230,81,0,0.88);color:#FFCC80;">
+      <span style="font-size:13px;">🔒</span>
+      主持人已锁定白板 · 当前为只读模式
+    </div>
+  </div>
+
+</div>
+
+<!-- Banner 规格说明 -->
+<div style="margin-top:14px; padding:14px 20px; background:#141414; border:1px solid #222; border-radius:8px; font-size:14px; color:#777; line-height:1.8;">
+  <strong style="color:#90CAF9;">规格</strong>：
+  高度 28px · 水平内边距 16px · 字号 14sp（caption） ·
+  图标 14dp · 透明度 80% · 不含交互按钮（仅状态展示）·
+  例外：断线超 5 次后 Banner 变为可点击（蓝色下划线文字）
+</div>
+
+
+<hr class="section-sep">
+
+<!-- ══════════════════════════════════════════════════════
+     第三章：Error Bottom Sheet
+     ══════════════════════════════════════════════════════ -->
+<div class="section-label">Section 03</div>
+<h2 class="section-title">Error Bottom Sheet</h2>
+<p class="section-desc">
+  需要用户明确决策的错误 · 点击遮罩不关闭（避免意外取消）· 标题使用错误色 · 操作按钮横排，主要按钮在右
+</p>
+
+<div class="error-sheet-showcase">
+
+  <!-- ── 错误 1：文件保存失败 ── -->
+  <div class="error-sheet-card">
+    <div class="error-sheet-header-bar">保存失败（文件权限错误）</div>
+    <div class="error-canvas-bg">
+      <div class="error-sheet">
+        <div class="drag-handle"></div>
+
+        <div class="error-sheet-title-row">
+          <span class="error-icon">⚠️</span>
+          <span class="error-title">保存失败</span>
+        </div>
+
+        <div class="error-body">
+          无法将文件保存到所选位置，可能是存储权限不足或磁盘已满。
+          <div class="error-detail">错误：EACCES - Permission denied /storage/emulated/0/PaintBoard/</div>
+        </div>
+
+        <div class="error-btn-row">
+          <div class="btn btn-cancel">取消</div>
+          <div class="btn btn-primary">选择其他位置</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 错误 2：新建白板（有未保存内容） ── -->
+  <div class="error-sheet-card">
+    <div class="error-sheet-header-bar">新建白板确认（有未保存内容）</div>
+    <div class="error-canvas-bg">
+      <div class="error-sheet">
+        <div class="drag-handle"></div>
+
+        <div class="error-sheet-title-row">
+          <span class="error-icon">⚠️</span>
+          <span class="error-title" style="color:var(--warning);">当前白板未保存</span>
+        </div>
+
+        <div class="error-body">
+          新建白板将清空当前所有内容。您有未保存的修改，是否先保存？
+        </div>
+
+        <div class="error-btn-row">
+          <div class="btn btn-danger">不保存，直接新建</div>
+          <div class="btn btn-primary">先保存再新建</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 错误 3：扫码分享失败 ── -->
+  <div class="error-sheet-card">
+    <div class="error-sheet-header-bar">扫码分享失败（网络错误）</div>
+    <div class="error-canvas-bg">
+      <div class="error-sheet">
+        <div class="drag-handle"></div>
+
+        <div class="error-sheet-title-row">
+          <span class="error-icon">❌</span>
+          <span class="error-title">分享服务启动失败</span>
+        </div>
+
+        <div class="error-body">
+          无法启动本地 HTTP 服务，可能是端口 8080 已被占用，或当前无可用网络连接。
+          <div class="error-detail">错误：EADDRINUSE - Port 8080 already in use</div>
+        </div>
+
+        <div class="error-btn-row">
+          <div class="btn btn-cancel">取消</div>
+          <div class="btn btn-primary">重试</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 错误 4：存储空间不足 ── -->
+  <div class="error-sheet-card">
+    <div class="error-sheet-header-bar">存储空间不足</div>
+    <div class="error-canvas-bg">
+      <div class="error-sheet">
+        <div class="drag-handle"></div>
+
+        <div class="error-sheet-title-row">
+          <span class="error-icon">💾</span>
+          <span class="error-title">存储空间不足</span>
+        </div>
+
+        <div class="error-body">
+          设备存储空间不足，无法完成导出。当前可用空间：<strong style="color:#FFCC80;">48 MB</strong>，建议释放至少 200 MB 后重试。
+        </div>
+
+        <div style="background:#383838;border-radius:8px;padding:10px 14px;margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;font-size:15px;margin-bottom:6px;">
+            <span style="color:#888;">已用</span>
+            <span style="color:#EF9A9A;font-weight:600;">14.5 GB / 15 GB</span>
+          </div>
+          <div style="height:6px;background:#4A4A4A;border-radius:100px;">
+            <div style="width:97%;height:100%;background:#EF9A9A;border-radius:100px;"></div>
+          </div>
+        </div>
+
+        <div class="error-btn-row">
+          <div class="btn btn-cancel">取消</div>
+          <div class="btn btn-warning">打开存储设置</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /error-sheet-showcase -->
+
+
+<hr class="section-sep">
+
+<!-- ══════════════════════════════════════════════════════
+     第四章：崩溃恢复 Bottom Sheet
+     ══════════════════════════════════════════════════════ -->
+<div class="section-label">Section 04</div>
+<h2 class="section-title">崩溃恢复 Bottom Sheet</h2>
+<p class="section-desc">
+  App 崩溃后重启，检测到未保存的崩溃恢复草稿，弹出提示让用户选择恢复或丢弃
+</p>
+
+<div style="background:#141414; border:1px solid #272727; border-radius:12px; overflow:hidden; max-width:700px;">
+  <div style="padding:12px 18px; background:#161616; border-bottom:1px solid #222; font-size:13px; color:#666;">
+    App 重启后首屏（崩溃恢复检测到草稿）
+  </div>
+
+  <!-- 画布背景 + crash sheet -->
+  <div style="background:linear-gradient(to bottom, #1E1E1E 30%, rgba(0,0,0,0.6) 100%); padding-top:30px;">
+
+    <!-- 简单的画布内容（上次工作状态） -->
+    <div style="margin:0 24px 0; border-radius:8px; overflow:hidden; border:1px solid #333;">
+      <svg width="100%" viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg">
+        <rect width="640" height="200" fill="#1E1E1E"/>
+        <path d="M 60 80 C 120 50, 200 90, 280 60 C 340 35, 420 75, 500 50"
+              stroke="#1E88E5" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.7"/>
+        <rect x="80" y="100" width="200" height="80" rx="4"
+              stroke="#FFFFFF" stroke-width="2" fill="none" opacity="0.4"/>
+        <path d="M 340 130 C 390 105, 450 145, 500 120 C 540 100, 580 130, 610 115"
+              stroke="#E53935" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.6"/>
+        <!-- 崩溃恢复标注 -->
+        <text x="12" y="18" fill="#FFCC80" font-size="11" opacity="0.7">崩溃恢复草稿（未保存）</text>
+      </svg>
+    </div>
+
+    <!-- Crash Recovery Bottom Sheet -->
+    <div class="crash-sheet" style="margin-top:8px;">
+      <div class="drag-handle"></div>
+
+      <div class="crash-icon-row">
+        <div class="crash-icon-badge">🔄</div>
+        <div>
+          <div class="crash-title">检测到未保存的白板</div>
+          <div class="crash-sub">上次 App 意外退出，发现可恢复的草稿</div>
+        </div>
+      </div>
+
+      <div class="crash-body">
+        找到一份崩溃前未保存的白板草稿，是否恢复？
+      </div>
+
+      <div class="crash-note">
+        ⚠ 若选择「丢弃」，此草稿将被永久删除，无法找回。
+      </div>
+
+      <!-- 文件信息 -->
+      <div class="crash-file-info">
+        <div class="file-row">
+          <span class="file-label">草稿时间</span>
+          <span class="file-val">2026-03-23 14:32:15</span>
+        </div>
+        <div class="file-row">
+          <span class="file-label">页面数</span>
+          <span class="file-val">3 页</span>
+        </div>
+        <div class="file-row" style="margin-bottom:0;">
+          <span class="file-label">草稿大小</span>
+          <span class="file-val">2.4 MB</span>
+        </div>
+      </div>
+
+      <div class="error-btn-row">
+        <div class="btn btn-danger">丢弃草稿</div>
+        <div class="btn btn-primary">恢复草稿</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- 崩溃恢复规格说明 -->
+<div style="margin-top:14px; padding:14px 20px; background:#141414; border:1px solid #222; border-radius:8px; font-size:14px; color:#777; line-height:1.8;">
+  <strong style="color:#90CAF9;">行为规范</strong>：
+  崩溃恢复 Sheet 在 App 启动时检测到草稿文件时自动弹出 ·
+  点击遮罩不关闭（用户必须明确选择恢复或丢弃）·
+  「丢弃草稿」使用红色危险色强调不可逆操作 ·
+  「恢复草稿」为主要操作（蓝色按钮，右对齐）
+</div>
+
+</body>
+</html>

@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>01 · 主画布页面 — PaintBoard 效果图</title>
+  <style>
+    /* ===================================================================
+       01-main-canvas.html
+       模拟 1920×1080 大屏主界面
+       - 深色画布区域（笔迹 + 矩形示意）
+       - 底部工具栏完整六分区
+       - 画笔工具激活，中等粗细，黑色选中
+       - 右下角页码 1/3
+       =================================================================== */
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      /* ── 颜色 Token（深色主题）── */
+      --canvas-bg:        #1E1E1E;
+      --toolbar-bg:       rgba(44,44,44,0.96);
+      --toolbar-border:   #424242;
+      --toolbar-divider:  #3A3A3A;
+      --active-color:     #90CAF9;   /* 激活背景色 */
+      --active-bg:        #1565C0;   /* 激活态按钮背景 */
+      --text-primary:     #FFFFFF;
+      --text-secondary:   #BDBDBD;
+      --icon-default:     #9E9E9E;
+      --icon-disabled:    #616161;
+      --quick-black:      #212121;
+      --quick-red:        #E53935;
+      --quick-blue:       #1E88E5;
+      --quick-green:      #43A047;
+      --surface:          #2D2D2D;
+    }
+
+    /* ── 整体布局：模拟 1920×1080 大屏 ── */
+    body {
+      background: #111;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+      font-family: "Roboto", sans-serif;
+      min-height: 100vh;
+    }
+
+    /* 顶部导航（效果图专用，不属于 App UI） */
+    .nav-bar {
+      width: 100%;
+      max-width: 1200px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      color: #666;
+    }
+    .nav-bar a { color: #90CAF9; text-decoration: none; }
+    .nav-bar a:hover { text-decoration: underline; }
+    .nav-bar .sep { color: #444; }
+
+    /* ── App 屏幕容器（16:9 = 1920×1080 缩放至 1280×720 展示） ── */
+    .screen {
+      width: 1280px;
+      height: 720px;
+      background: var(--canvas-bg);
+      position: relative;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.7);
+    }
+
+    /* ── 画布区域 ── */
+    .canvas-area {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      bottom: 72px; /* 为工具栏留空 */
+    }
+
+    /* SVG 笔迹内容（模拟白板书写内容） */
+    .canvas-content {
+      width: 100%;
+      height: 100%;
+    }
+
+    /* ── 底部工具栏 ── */
+    .toolbar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 72px;
+      background: var(--toolbar-bg);
+      border-top: 1px solid var(--toolbar-border);
+      border-radius: 16px 16px 0 0;
+      box-shadow: 0 -2px 8px rgba(0,0,0,0.40), 0 -1px 3px rgba(0,0,0,0.25);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 0;
+    }
+
+    /* ── 工具栏分区 ── */
+    .toolbar-section {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 8px;
+    }
+
+    /* 分隔线 */
+    .toolbar-divider {
+      width: 1px;
+      height: 32px;
+      background: var(--toolbar-divider);
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+
+    /* 通用图标按钮 */
+    .tool-btn {
+      width: 64px;
+      height: 64px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      position: relative;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+
+    .tool-btn .icon-inner {
+      width: 40px;
+      height: 40px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    /* 普通状态 */
+    .tool-btn .icon-inner svg { stroke: var(--icon-default); fill: none; }
+    .tool-btn .icon-inner .fill-icon { fill: var(--icon-default); stroke: none; }
+
+    /* 激活状态 */
+    .tool-btn.active .icon-inner {
+      background: var(--active-color);
+    }
+    .tool-btn.active .icon-inner svg { stroke: #003C8F; fill: none; }
+    .tool-btn.active .icon-inner .fill-icon { fill: #003C8F; stroke: none; }
+
+    /* 禁用状态 */
+    .tool-btn.disabled .icon-inner svg { stroke: var(--icon-disabled); fill: none; }
+    .tool-btn.disabled .icon-inner .fill-icon { fill: var(--icon-disabled); stroke: none; }
+
+    /* ── C 区快捷色色块 ── */
+    .color-chip {
+      width: 64px;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .color-chip .chip-circle {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      transition: transform 0.1s;
+    }
+
+    /* 黑色色块需白色描边 */
+    .color-chip .chip-circle.chip-black {
+      background: #212121;
+      box-shadow: 0 0 0 1px rgba(255,255,255,0.5);
+    }
+    .color-chip .chip-circle.chip-red   { background: #E53935; }
+    .color-chip .chip-circle.chip-blue  { background: #1E88E5; }
+    .color-chip .chip-circle.chip-green { background: #43A047; }
+
+    /* 选中态：白色外环 + 透明间隙 */
+    .color-chip.selected .chip-circle {
+      box-shadow: 0 0 0 2px var(--canvas-bg), 0 0 0 5px #FFFFFF;
+    }
+    .color-chip.selected .chip-circle.chip-black {
+      box-shadow: 0 0 0 2px var(--canvas-bg), 0 0 0 5px #FFFFFF;
+    }
+
+    /* ── F 区页面管理 ── */
+    .page-nav {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 0 8px;
+    }
+
+    .page-nav .nav-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .page-nav .nav-btn svg { stroke: var(--icon-default); fill: none; }
+
+    .page-nav .page-label {
+      min-width: 64px;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+      cursor: pointer;
+      border-radius: 8px;
+      padding: 0 8px;
+    }
+
+    .page-nav .add-page-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      margin-left: 4px;
+    }
+    .page-nav .add-page-btn svg { stroke: var(--icon-default); fill: none; }
+
+    /* ── B 区粗细线视觉 ── */
+    .stroke-line {
+      stroke-linecap: round;
+    }
+
+    /* ── 说明标注（效果图专用） ── */
+    .annotation {
+      position: absolute;
+      background: rgba(144,202,249,0.15);
+      border: 1px dashed rgba(144,202,249,0.5);
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 12px;
+      color: #90CAF9;
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
+  </style>
+</head>
+<body>
+
+<!-- 效果图导航 -->
+<div class="nav-bar">
+  <a href="index.html">← 返回导航</a>
+  <span class="sep">/</span>
+  <span style="color:#ccc;">01 · 主画布页面</span>
+  <span class="sep">·</span>
+  <span>模拟 1920×1080 大屏（缩放展示为 1280×720）</span>
+</div>
+
+<!-- App 屏幕 -->
+<div class="screen" id="screen">
+
+  <!-- ══════════════════════════════
+       画布区域（SVG 模拟笔迹 + 图形）
+       ══════════════════════════════ -->
+  <div class="canvas-area">
+    <svg class="canvas-content" viewBox="0 0 1280 648" xmlns="http://www.w3.org/2000/svg">
+
+      <!-- 背景 -->
+      <rect width="1280" height="648" fill="#1E1E1E"/>
+
+      <!-- === 模拟笔迹 1：蓝色自由曲线 === -->
+      <path d="M 180 180 C 220 150, 280 200, 320 170 C 360 140, 420 190, 460 160 C 500 130, 540 165, 580 155"
+            stroke="#1E88E5" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+
+      <!-- === 模拟笔迹 2：黑色书写文字轮廓 "会议" === -->
+      <!-- 会 -->
+      <path d="M 220 280 L 220 240 L 260 240 L 260 280" stroke="#EEE" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path d="M 200 260 L 280 260" stroke="#EEE" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path d="M 240 240 L 240 220" stroke="#EEE" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <!-- 简单的几条线代表文字笔迹 -->
+      <path d="M 300 230 L 380 230 M 340 230 L 340 290 M 300 260 L 380 260 M 300 290 L 380 290"
+            stroke="#EEE" stroke-width="3" fill="none" stroke-linecap="round"/>
+
+      <!-- === 模拟笔迹 3：红色标注曲线 === -->
+      <path d="M 550 300 C 580 270, 650 310, 700 280 C 730 260, 780 300, 820 270 C 840 255, 860 270, 880 260"
+            stroke="#E53935" stroke-width="5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+
+      <!-- === 模拟笔迹 4：绿色箭头线 === -->
+      <path d="M 400 380 L 600 380" stroke="#43A047" stroke-width="4" fill="none" stroke-linecap="round"/>
+      <path d="M 585 368 L 600 380 L 585 392" stroke="#43A047" stroke-width="4" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <!-- === 模拟矩形图形 === -->
+      <rect x="700" y="200" width="280" height="180" rx="4"
+            stroke="#FFFFFF" stroke-width="3" fill="none" opacity="0.7"/>
+      <!-- 矩形内简单标注线 -->
+      <line x1="730" y1="260" x2="950" y2="260" stroke="#9E9E9E" stroke-width="2" opacity="0.5"/>
+      <line x1="730" y1="310" x2="880" y2="310" stroke="#9E9E9E" stroke-width="2" opacity="0.5"/>
+
+      <!-- === 模拟笔迹 5：黑色自由曲线（较粗） === -->
+      <path d="M 150 450 C 200 420, 280 470, 340 440 C 400 410, 460 460, 520 430"
+            stroke="#EEEEEE" stroke-width="7" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+
+      <!-- === 模拟三角形 === -->
+      <polygon points="1000,200 1080,360 920,360"
+               stroke="#90CAF9" stroke-width="3" fill="rgba(144,202,249,0.08)" opacity="0.8"/>
+
+      <!-- 轻微网格线提示（可选，模拟白板感） -->
+      <!-- 每 80px 一条淡竖线 -->
+      <line x1="80" y1="0" x2="80" y2="648" stroke="#424242" stroke-width="0.5" opacity="0.3"/>
+      <line x1="160" y1="0" x2="160" y2="648" stroke="#424242" stroke-width="0.5" opacity="0.3"/>
+      <line x1="1120" y1="0" x2="1120" y2="648" stroke="#424242" stroke-width="0.5" opacity="0.3"/>
+      <line x1="1200" y1="0" x2="1200" y2="648" stroke="#424242" stroke-width="0.5" opacity="0.3"/>
+
+    </svg>
+  </div>
+
+
+  <!-- ══════════════════════════════
+       底部工具栏（72px 高）
+       六分区：A 绘图 | B 粗细 | C 颜色 | D 操作 | E 功能 | F 页面
+       ══════════════════════════════ -->
+  <div class="toolbar">
+
+    <!-- ── A 区：绘图工具（画笔/橡皮/图形/便利贴） ── -->
+    <div class="toolbar-section">
+
+      <!-- 画笔（激活） -->
+      <div class="tool-btn active" title="画笔">
+        <div class="icon-inner">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2">
+            <path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/>
+            <path d="M20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 橡皮擦 -->
+      <div class="tool-btn" title="橡皮擦">
+        <div class="icon-inner">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2">
+            <path d="M20 20H7L3 16l10.5-10.5a2 2 0 012.83 0l4.24 4.24a2 2 0 010 2.83L14 19"/>
+            <line x1="6" y1="20" x2="20" y2="20"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 图形工具 -->
+      <div class="tool-btn" title="图形工具">
+        <div class="icon-inner">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2">
+            <polygon points="12,3 3,21 21,21"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 便利贴（禁用 v1.5 占位） -->
+      <div class="tool-btn disabled" title="便利贴（即将推出）">
+        <div class="icon-inner">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h7l5-5V4a2 2 0 00-2-2z"/>
+            <polyline points="14,2 14,8 20,8"/>
+          </svg>
+        </div>
+      </div>
+
+    </div><!-- /A区 -->
+
+    <div class="toolbar-divider"></div>
+
+    <!-- ── B 区：笔画粗细（细/中/粗） ── -->
+    <div class="toolbar-section">
+
+      <!-- 细线 -->
+      <div class="tool-btn" title="细线">
+        <div class="icon-inner">
+          <svg width="32" height="16" viewBox="0 0 32 16">
+            <line x1="4" y1="8" x2="28" y2="8" stroke="#9E9E9E" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 中线（激活） -->
+      <div class="tool-btn active" title="中等粗细">
+        <div class="icon-inner">
+          <svg width="32" height="16" viewBox="0 0 32 16">
+            <line x1="4" y1="8" x2="28" y2="8" stroke="#003C8F" stroke-width="4" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 粗线 -->
+      <div class="tool-btn" title="粗线">
+        <div class="icon-inner">
+          <svg width="32" height="16" viewBox="0 0 32 16">
+            <line x1="4" y1="8" x2="28" y2="8" stroke="#9E9E9E" stroke-width="8" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+
+    </div><!-- /B区 -->
+
+    <div class="toolbar-divider"></div>
+
+    <!-- ── C 区：颜色（4快捷色 + 调色盘） ── -->
+    <div class="toolbar-section">
+
+      <!-- 黑色（选中） -->
+      <div class="color-chip selected" title="黑色">
+        <div class="chip-circle chip-black"></div>
+      </div>
+
+      <!-- 红色 -->
+      <div class="color-chip" title="红色">
+        <div class="chip-circle chip-red"></div>
+      </div>
+
+      <!-- 蓝色 -->
+      <div class="color-chip" title="蓝色">
+        <div class="chip-circle chip-blue"></div>
+      </div>
+
+      <!-- 自定义（绿色） -->
+      <div class="color-chip" title="自定义色">
+        <div class="chip-circle chip-green"></div>
+      </div>
+
+      <!-- 调色盘按钮 -->
+      <div class="tool-btn" title="更多颜色">
+        <div class="icon-inner">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <circle cx="12" cy="8" r="1.5" fill="#E53935" stroke="none"/>
+            <circle cx="15.5" cy="11" r="1.5" fill="#FB8C00" stroke="none"/>
+            <circle cx="15.5" cy="15" r="1.5" fill="#43A047" stroke="none"/>
+            <circle cx="12" cy="17" r="1.5" fill="#1E88E5" stroke="none"/>
+            <circle cx="8.5" cy="15" r="1.5" fill="#8E24AA" stroke="none"/>
+            <circle cx="8.5" cy="11" r="1.5" fill="#FFFFFF" stroke="none"/>
+          </svg>
+        </div>
+      </div>
+
+    </div><!-- /C区 -->
+
+    <div class="toolbar-divider"></div>
+
+    <!-- ── D 区：撤销 / 重做 ── -->
+    <div class="toolbar-section">
+
+      <!-- 撤销（可用） -->
+      <div class="tool-btn" title="撤销">
+        <div class="icon-inner">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2" fill="none">
+            <path d="M3 7v6h6"/>
+            <path d="M3 13C5.4 7.9 11 4 17 5.1A9 9 0 0121 13"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 重做（可用） -->
+      <div class="tool-btn" title="重做">
+        <div class="icon-inner">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2" fill="none">
+            <path d="M21 7v6h-6"/>
+            <path d="M21 13A9 9 0 007 5.1C5 6.4 3.5 8.6 3 11"/>
+          </svg>
+        </div>
+      </div>
+
+    </div><!-- /D区 -->
+
+    <div class="toolbar-divider"></div>
+
+    <!-- ── E 区：功能（协同 / 分享 / 更多） ── -->
+    <div class="toolbar-section">
+
+      <!-- 协同 -->
+      <div class="tool-btn" title="协同书写">
+        <div class="icon-inner">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2" fill="none">
+            <circle cx="9" cy="7" r="3"/>
+            <circle cx="17" cy="7" r="2"/>
+            <path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"/>
+            <path d="M17 9c1.7 0 4 1.3 4 4"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 分享 -->
+      <div class="tool-btn" title="扫码分享">
+        <div class="icon-inner">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2" fill="none">
+            <rect x="3" y="3" width="7" height="7"/>
+            <rect x="14" y="3" width="7" height="7"/>
+            <rect x="3" y="14" width="7" height="7"/>
+            <rect x="5" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/>
+            <rect x="16" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/>
+            <rect x="5" y="16" width="3" height="3" fill="#9E9E9E" stroke="none"/>
+            <line x1="14" y1="14" x2="21" y2="14"/>
+            <line x1="14" y1="21" x2="14" y2="14"/>
+            <line x1="21" y1="21" x2="21" y2="14"/>
+          </svg>
+        </div>
+      </div>
+
+      <!-- 更多 -->
+      <div class="tool-btn" title="更多">
+        <div class="icon-inner">
+          <svg width="24" height="24" viewBox="0 0 24 24" stroke-width="2" fill="none">
+            <circle cx="12" cy="5" r="1.5" fill="#9E9E9E" stroke="none"/>
+            <circle cx="12" cy="12" r="1.5" fill="#9E9E9E" stroke="none"/>
+            <circle cx="12" cy="19" r="1.5" fill="#9E9E9E" stroke="none"/>
+          </svg>
+        </div>
+      </div>
+
+    </div><!-- /E区 -->
+
+    <div class="toolbar-divider"></div>
+
+    <!-- ── F 区：页面管理（◀ 页码 ▶ + 新增） ── -->
+    <div class="page-nav">
+
+      <!-- 上一页 -->
+      <div class="nav-btn" title="上一页">
+        <svg width="20" height="20" viewBox="0 0 24 24" stroke-width="2.5">
+          <polyline points="15,6 9,12 15,18"/>
+        </svg>
+      </div>
+
+      <!-- 页码（点击弹出页面管理） -->
+      <div class="page-label" title="页面管理">1/3</div>
+
+      <!-- 下一页 -->
+      <div class="nav-btn" title="下一页">
+        <svg width="20" height="20" viewBox="0 0 24 24" stroke-width="2.5">
+          <polyline points="9,6 15,12 9,18"/>
+        </svg>
+      </div>
+
+      <!-- 新增页 -->
+      <div class="add-page-btn" title="新增页面">
+        <svg width="20" height="20" viewBox="0 0 24 24" stroke-width="2.5">
+          <line x1="12" y1="5" x2="12" y2="19"/>
+          <line x1="5" y1="12" x2="19" y2="12"/>
+        </svg>
+      </div>
+
+    </div><!-- /F区 -->
+
+  </div><!-- /toolbar -->
+
+</div><!-- /screen -->
+
+<!-- 图例说明 -->
+<div style="width:1280px; margin-top:20px; padding:16px 20px; background:#1a1a1a; border-radius:8px;
+            border:1px solid #333; font-size:13px; color:#888; line-height:1.8;">
+  <strong style="color:#90CAF9;">图示说明</strong>：
+  画笔工具已激活（蓝色背景块）· 中等粗细已激活 · 黑色快捷色已选中（白色外环）·
+  便利贴为 v1.5 占位（禁用态，图标变暗）· 页码区显示"1/3" · 工具栏高度 72px
+</div>
+
+</body>
+</html>

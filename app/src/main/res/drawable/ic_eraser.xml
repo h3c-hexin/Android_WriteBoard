@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    橡皮擦图标，与 HTML 效果图一致
+    SVG 原路径：
+      path d="M20 20H7L3 16l10.5-10.5a2 2 0 012.83 0l4.24 4.24a2 2 0 010 2.83L14 19"
+      line x1="6" y1="20" x2="20" y2="20"
+    strokeWidth=2，填充 none，使用 strokeColor 控制颜色
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 橡皮擦主体轮廓 -->
+    <path
+        android:pathData="M20,20H7L3,16l10.5,-10.5a2,2 0,0 1,2.83 0l4.24,4.24a2,2 0,0 1,0 2.83L14,19"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent" />
+
+    <!-- 橡皮擦底部横线 -->
+    <path
+        android:pathData="M6,20L20,20"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent" />
+
+</vector>

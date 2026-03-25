@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>04 · 协同状态展示 — PaintBoard 效果图</title>
+  <style>
+    /* ===================================================================
+       04-collaboration-states.html
+       展示主画布在四种协同状态下的样子：
+       1. 未连接（默认状态）
+       2. 协同中（顶部 Banner + 在线人数 + 彩色光标）
+       3. 主持人锁定（只读状态提示）
+       4. 断线重连中（重连 Banner + 进度指示）
+       =================================================================== */
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --canvas-bg:       #1E1E1E;
+      --toolbar-bg:      rgba(44,44,44,0.97);
+      --toolbar-border:  #424242;
+      --toolbar-divider: #3A3A3A;
+      --active-color:    #90CAF9;
+      --text-primary:    #FFFFFF;
+      --text-secondary:  #BDBDBD;
+      --icon-default:    #9E9E9E;
+      --success-color:   #A5D6A7;
+      --warning-color:   #FFCC80;
+      --error-color:     #EF9A9A;
+      --surface:         #2D2D2D;
+    }
+
+    body {
+      background: #0E0E0E;
+      color: var(--text-primary);
+      font-family: "Roboto", sans-serif;
+      padding: 24px 32px 60px;
+      min-height: 100vh;
+    }
+
+    .nav-bar {
+      display: flex; align-items: center; gap: 12px;
+      margin-bottom: 32px; font-size: 14px; color: #666;
+    }
+    .nav-bar a { color: #90CAF9; text-decoration: none; }
+    .nav-bar a:hover { text-decoration: underline; }
+
+    .page-title { font-size: 28px; font-weight: 600; margin-bottom: 8px; }
+    .page-subtitle { font-size: 16px; color: var(--text-secondary); margin-bottom: 40px; line-height: 1.5; }
+
+    /* 四个状态 2×2 网格 */
+    .states-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 28px;
+    }
+
+    /* 单个状态展示块 */
+    .state-card {
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid #222;
+    }
+
+    .state-card-header {
+      padding: 14px 20px 12px;
+      background: #161616;
+      border-bottom: 1px solid #222;
+      display: flex; align-items: center; gap: 12px;
+    }
+
+    .state-card-num {
+      font-size: 12px; font-weight: 700; color: #90CAF9;
+      letter-spacing: 0.1em; text-transform: uppercase;
+    }
+
+    .state-card-title {
+      font-size: 18px; font-weight: 600; color: var(--text-primary);
+    }
+
+    .state-card-badge {
+      margin-left: auto; font-size: 12px; padding: 3px 10px;
+      border-radius: 100px;
+    }
+    .badge-normal { background: rgba(144,202,249,0.15); border: 1px solid rgba(144,202,249,0.3); color: #90CAF9; }
+    .badge-active { background: rgba(165,214,167,0.15); border: 1px solid rgba(165,214,167,0.3); color: #A5D6A7; }
+    .badge-warning { background: rgba(255,204,128,0.15); border: 1px solid rgba(255,204,128,0.3); color: #FFCC80; }
+    .badge-error { background: rgba(239,154,154,0.15); border: 1px solid rgba(239,154,154,0.3); color: #EF9A9A; }
+
+    /* ── App 屏幕模拟（缩小版，640×360） ── */
+    .mini-screen {
+      width: 100%;
+      aspect-ratio: 16/9;
+      background: var(--canvas-bg);
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* 画布 SVG 内容 */
+    .canvas-svg {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+
+    /* ── 顶部 Banner ── */
+    .top-banner {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 28px;
+      display: flex; align-items: center; justify-content: center;
+      gap: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      z-index: 10;
+    }
+    .banner-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .banner-success {
+      background: rgba(27,94,32,0.88);
+      color: var(--success-color);
+    }
+    .banner-warning {
+      background: rgba(230,81,0,0.88);
+      color: var(--warning-color);
+    }
+    .banner-error {
+      background: rgba(183,28,28,0.88);
+      color: var(--error-color);
+    }
+
+    /* ── 在线人数徽章（右上角） ── */
+    .online-badge {
+      position: absolute;
+      top: 36px; right: 12px;
+      background: rgba(44,44,44,0.92);
+      border: 1px solid #424242;
+      border-radius: 100px;
+      padding: 4px 10px 4px 8px;
+      display: flex; align-items: center; gap: 6px;
+      font-size: 14px; color: var(--text-primary);
+      z-index: 10;
+    }
+    .online-badge-dot { width: 8px; height: 8px; border-radius: 50%; background: #A5D6A7; }
+
+    /* 用户头像堆叠 */
+    .avatar-stack {
+      display: flex; align-items: center;
+    }
+    .avatar {
+      width: 22px; height: 22px; border-radius: 50%;
+      border: 1.5px solid #2C2C2C;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 700; color: #FFF;
+    }
+    .avatar + .avatar { margin-left: -6px; }
+
+    /* ── 彩色光标 ── */
+    .user-cursor {
+      position: absolute;
+      display: flex; flex-direction: column; align-items: flex-start;
+      pointer-events: none;
+      z-index: 8;
+    }
+    .cursor-pointer {
+      width: 0; height: 0;
+      border-left: 7px solid transparent;
+      border-right: 2px solid transparent;
+      border-bottom-width: 14px;
+      border-bottom-style: solid;
+      transform: rotate(-30deg);
+    }
+    .cursor-label {
+      margin-top: 2px;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 12px; color: #FFF; font-weight: 600;
+      white-space: nowrap;
+    }
+
+    /* ── 只读锁定遮罩 ── */
+    .lock-overlay {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 72px;
+      background: rgba(0,0,0,0.25);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 9;
+    }
+    .lock-badge {
+      background: rgba(44,44,44,0.95);
+      border: 1px solid #424242;
+      border-radius: 12px;
+      padding: 14px 24px;
+      display: flex; align-items: center; gap: 12px;
+    }
+    .lock-icon { font-size: 24px; }
+    .lock-text { font-size: 16px; color: var(--warning-color); font-weight: 600; }
+    .lock-subtext { font-size: 14px; color: #888; margin-top: 2px; }
+
+    /* ── 重连动画指示器 ── */
+    .reconnect-spinner {
+      width: 16px; height: 16px;
+      border: 2px solid rgba(255,204,128,0.3);
+      border-top-color: var(--warning-color);
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── 工具栏（Mini 版，用于迷你屏幕） ── */
+    .mini-toolbar {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 52px;
+      background: var(--toolbar-bg);
+      border-top: 1px solid var(--toolbar-border);
+      border-radius: 12px 12px 0 0;
+      display: flex; align-items: center;
+      padding: 0 12px; gap: 0;
+      z-index: 5;
+    }
+
+    .mini-section {
+      display: flex; align-items: center; gap: 6px; padding: 0 6px;
+    }
+
+    .mini-divider {
+      width: 1px; height: 24px;
+      background: var(--toolbar-divider); border-radius: 4px; flex-shrink: 0;
+    }
+
+    .mini-btn {
+      width: 44px; height: 44px;
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .mini-btn svg { stroke: var(--icon-default); fill: none; }
+
+    .mini-btn.active .mini-inner { background: var(--active-color); border-radius: 6px; }
+    .mini-inner {
+      width: 32px; height: 32px;
+      display: flex; align-items: center; justify-content: center;
+      border-radius: 6px;
+    }
+    .mini-btn.active .mini-inner svg { stroke: #003C8F; }
+
+    .mini-color-dot {
+      width: 26px; height: 26px; border-radius: 50%;
+    }
+    .dot-black { background:#212121; box-shadow:0 0 0 1px rgba(255,255,255,0.3); }
+    .dot-red   { background:#E53935; }
+    .dot-blue  { background:#1E88E5; }
+    .dot-green { background:#43A047; }
+    .dot-selected { box-shadow: 0 0 0 1.5px #1E1E1E, 0 0 0 3.5px #FFF; }
+
+    .mini-page-label {
+      font-size: 14px; font-weight: 600; color: var(--text-primary);
+      padding: 0 4px;
+    }
+
+    /* 工具栏图标禁用 */
+    .mini-btn.disabled .mini-inner svg { stroke: #616161 !important; }
+
+    /* 锁定状态工具栏变暗 */
+    .locked-toolbar {
+      opacity: 0.5;
+    }
+    .locked-toolbar::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.3);
+      border-radius: 12px 12px 0 0;
+    }
+
+    /* 协同激活时工具栏协同按钮激活态 */
+    .collab-active-icon { fill: #A5D6A7 !important; stroke: none !important; }
+
+    /* 状态描述文字 */
+    .state-desc-bar {
+      padding: 12px 20px;
+      background: #161616;
+      border-top: 1px solid #222;
+      font-size: 14px;
+      color: #888;
+      line-height: 1.5;
+    }
+
+  </style>
+</head>
+<body>
+
+<!-- 顶部导航 -->
+<div class="nav-bar">
+  <a href="index.html">← 返回导航</a>
+  <span style="color:#444;">/</span>
+  <span style="color:#ccc;">04 · 协同状态展示</span>
+</div>
+
+<h1 class="page-title">协同状态展示</h1>
+<p class="page-subtitle">展示主画布界面在四种协同场景下的视觉状态，所有状态均在不遮挡画布的前提下提示用户</p>
+
+<div class="states-grid">
+
+  <!-- ═══════════════════════════════════════════
+       状态 1：未连接（默认状态）
+       ═══════════════════════════════════════════ -->
+  <div class="state-card">
+    <div class="state-card-header">
+      <span class="state-card-num">01</span>
+      <span class="state-card-title">未连接（默认）</span>
+      <span class="state-card-badge badge-normal">未开启协同</span>
+    </div>
+
+    <div class="mini-screen">
+
+      <!-- 画布内容 -->
+      <svg class="canvas-svg" viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
+        <rect width="640" height="360" fill="#1E1E1E"/>
+        <path d="M 80 150 C 120 120, 180 160, 220 130 C 260 100, 300 145, 340 125"
+              stroke="#EEEEEE" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.7"/>
+        <rect x="360" y="100" width="180" height="100" rx="4"
+              stroke="#FFFFFF" stroke-width="2" fill="none" opacity="0.5"/>
+        <path d="M 100 240 C 150 210, 200 250, 260 225"
+              stroke="#E53935" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.7"/>
+      </svg>
+
+      <!-- 无任何协同指示，只有正常工具栏 -->
+      <div class="mini-toolbar">
+        <div class="mini-section">
+          <!-- 画笔激活 -->
+          <div class="mini-btn active">
+            <div class="mini-inner">
+              <svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/><path d="M20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+            </div>
+          </div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5"><path d="M20 20H7L3 16l10.5-10.5a2 2 0 012.83 0l4.24 4.24a2 2 0 010 2.83L14 19"/><line x1="6" y1="20" x2="20" y2="20"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5"><polygon points="12,3 3,21 21,21"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div class="mini-btn"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#9E9E9E" stroke-width="2" stroke-linecap="round"/></svg></div></div>
+          <div class="mini-btn active"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#003C8F" stroke-width="4" stroke-linecap="round"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#9E9E9E" stroke-width="7" stroke-linecap="round"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;">
+            <div class="mini-color-dot dot-black dot-selected"></div>
+          </div>
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;">
+            <div class="mini-color-dot dot-red"></div>
+          </div>
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;">
+            <div class="mini-color-dot dot-blue"></div>
+          </div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none"><path d="M3 7v6h6"/><path d="M3 13C5.4 7.9 11 4 17 5.1A9 9 0 0121 13"/></svg></div></div>
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none"><path d="M21 7v6h-6"/><path d="M21 13A9 9 0 007 5.1C5 6.4 3.5 8.6 3 11"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <!-- 协同按钮（未激活，正常状态） -->
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="2"/><path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 9c1.7 0 4 1.3 4 4"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="5" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/><rect x="16" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/><rect x="5" y="16" width="3" height="3" fill="#9E9E9E" stroke="none"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="#9E9E9E"/><circle cx="12" cy="12" r="1.5" fill="#9E9E9E"/><circle cx="12" cy="19" r="1.5" fill="#9E9E9E"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div style="display:flex;align-items:center;gap:4px;padding:0 8px;">
+          <div class="mini-btn"><div class="mini-inner"><svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="15,6 9,12 15,18"/></svg></div></div>
+          <span class="mini-page-label">1/3</span>
+          <div class="mini-btn"><div class="mini-inner"><svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="9,6 15,12 9,18"/></svg></div></div>
+        </div>
+      </div>
+
+    </div><!-- /mini-screen -->
+    <div class="state-desc-bar">
+      无顶部 Banner · 无在线人数显示 · 协同按钮为普通状态（灰色图标）
+    </div>
+  </div><!-- /state-card 1 -->
+
+
+  <!-- ═══════════════════════════════════════════
+       状态 2：协同中（Banner + 光标 + 人数）
+       ═══════════════════════════════════════════ -->
+  <div class="state-card">
+    <div class="state-card-header">
+      <span class="state-card-num">02</span>
+      <span class="state-card-title">协同中</span>
+      <span class="state-card-badge badge-active">3 人在线</span>
+    </div>
+
+    <div class="mini-screen">
+
+      <!-- 顶部协同 Banner（绿色） -->
+      <div class="top-banner banner-success">
+        <div class="banner-dot" style="background:#A5D6A7;"></div>
+        协同中 · 3 人在线 · 房间 A7K3XP
+      </div>
+
+      <!-- 在线人数 + 头像（右上） -->
+      <div class="online-badge">
+        <div class="online-badge-dot"></div>
+        <div class="avatar-stack">
+          <div class="avatar" style="background:#1565C0;">主</div>
+          <div class="avatar" style="background:#43A047;">B</div>
+          <div class="avatar" style="background:#E53935;">C</div>
+        </div>
+        <span style="font-size:13px;color:#A5D6A7;">3</span>
+      </div>
+
+      <!-- 画布内容 -->
+      <svg class="canvas-svg" viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
+        <rect width="640" height="360" fill="#1E1E1E"/>
+        <!-- 用户A笔迹（蓝色） -->
+        <path d="M 60 160 C 100 130, 160 170, 200 140 C 240 110, 280 155, 320 130"
+              stroke="#1E88E5" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.9"/>
+        <!-- 用户B笔迹（绿色） -->
+        <path d="M 340 200 C 380 175, 430 210, 480 185 C 510 170, 550 195, 580 180"
+              stroke="#43A047" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.85"/>
+        <!-- 矩形 -->
+        <rect x="80" y="210" width="160" height="90" rx="4"
+              stroke="#FFFFFF" stroke-width="2" fill="none" opacity="0.5"/>
+        <!-- 用户C笔迹（红色） -->
+        <path d="M 200 250 C 240 220, 290 265, 340 240"
+              stroke="#E53935" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.8"/>
+      </svg>
+
+      <!-- 彩色光标 - 用户B（绿色） -->
+      <div class="user-cursor" style="top:165px; left:420px;">
+        <div class="cursor-pointer" style="border-bottom-color:#43A047;"></div>
+        <div class="cursor-label" style="background:#43A047;">用户B</div>
+      </div>
+
+      <!-- 彩色光标 - 用户C（红色） -->
+      <div class="user-cursor" style="top:228px; left:260px;">
+        <div class="cursor-pointer" style="border-bottom-color:#E53935;"></div>
+        <div class="cursor-label" style="background:#E53935;">用户C</div>
+      </div>
+
+      <!-- 工具栏（协同按钮激活绿色） -->
+      <div class="mini-toolbar">
+        <div class="mini-section">
+          <div class="mini-btn active"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/><path d="M20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5"><path d="M20 20H7L3 16l10.5-10.5a2 2 0 012.83 0l4.24 4.24a2 2 0 010 2.83L14 19"/><line x1="6" y1="20" x2="20" y2="20"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5"><polygon points="12,3 3,21 21,21"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div class="mini-btn"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#9E9E9E" stroke-width="2" stroke-linecap="round"/></svg></div></div>
+          <div class="mini-btn active"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#003C8F" stroke-width="4" stroke-linecap="round"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#9E9E9E" stroke-width="7" stroke-linecap="round"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;"><div class="mini-color-dot dot-black dot-selected"></div></div>
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;"><div class="mini-color-dot dot-red"></div></div>
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;"><div class="mini-color-dot dot-blue"></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none"><path d="M3 7v6h6"/><path d="M3 13C5.4 7.9 11 4 17 5.1A9 9 0 0121 13"/></svg></div></div>
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none"><path d="M21 7v6h-6"/><path d="M21 13A9 9 0 007 5.1C5 6.4 3.5 8.6 3 11"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <!-- 协同按钮（协同中，绿色激活） -->
+          <div class="mini-btn" style="position:relative;">
+            <div class="mini-inner" style="background:rgba(165,214,167,0.2);border-radius:6px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none" style="stroke:#A5D6A7;"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="2"/><path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 9c1.7 0 4 1.3 4 4"/></svg>
+            </div>
+            <!-- 绿点徽章 -->
+            <div style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:#A5D6A7;border:1.5px solid #2C2C2C;"></div>
+          </div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="5" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/><rect x="16" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/><rect x="5" y="16" width="3" height="3" fill="#9E9E9E" stroke="none"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="#9E9E9E"/><circle cx="12" cy="12" r="1.5" fill="#9E9E9E"/><circle cx="12" cy="19" r="1.5" fill="#9E9E9E"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div style="display:flex;align-items:center;gap:4px;padding:0 8px;">
+          <div class="mini-btn"><div class="mini-inner"><svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="15,6 9,12 15,18"/></svg></div></div>
+          <span class="mini-page-label">1/3</span>
+          <div class="mini-btn"><div class="mini-inner"><svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="9,6 15,12 9,18"/></svg></div></div>
+        </div>
+      </div>
+
+    </div><!-- /mini-screen -->
+    <div class="state-desc-bar">
+      顶部绿色 Banner（高度 28px）· 右上角在线人数徽章 + 头像堆叠 · 画布上彩色用户光标 + 姓名标签
+    </div>
+  </div><!-- /state-card 2 -->
+
+
+  <!-- ═══════════════════════════════════════════
+       状态 3：主持人锁定（只读状态）
+       ═══════════════════════════════════════════ -->
+  <div class="state-card">
+    <div class="state-card-header">
+      <span class="state-card-num">03</span>
+      <span class="state-card-title">主持人锁定</span>
+      <span class="state-card-badge badge-warning">只读模式</span>
+    </div>
+
+    <div class="mini-screen">
+
+      <!-- 顶部 Banner（锁定提示，橙色） -->
+      <div class="top-banner banner-warning">
+        <span style="font-size:13px;">🔒</span>
+        主持人已锁定白板 · 当前为只读模式
+      </div>
+
+      <!-- 在线人数徽章 -->
+      <div class="online-badge">
+        <div class="online-badge-dot"></div>
+        <div class="avatar-stack">
+          <div class="avatar" style="background:#1565C0;">主</div>
+          <div class="avatar" style="background:#43A047;">B</div>
+          <div class="avatar" style="background:#E53935;">C</div>
+        </div>
+        <span style="font-size:13px;color:#A5D6A7;">3</span>
+      </div>
+
+      <!-- 画布内容 -->
+      <svg class="canvas-svg" viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
+        <rect width="640" height="360" fill="#1E1E1E"/>
+        <path d="M 60 160 C 100 130, 160 170, 200 140 C 240 110, 280 155, 320 130"
+              stroke="#1E88E5" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.7"/>
+        <rect x="80" y="200" width="160" height="90" rx="4"
+              stroke="#FFFFFF" stroke-width="2" fill="none" opacity="0.4"/>
+        <path d="M 350 180 C 400 155, 450 195, 500 170"
+              stroke="#43A047" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.7"/>
+      </svg>
+
+      <!-- 只读遮罩 + 锁定提示 -->
+      <div class="lock-overlay">
+        <div class="lock-badge">
+          <span class="lock-icon">🔒</span>
+          <div>
+            <div class="lock-text">白板已锁定 · 只读</div>
+            <div class="lock-subtext">等待主持人解锁后可继续书写</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 工具栏（禁用大部分功能） -->
+      <div class="mini-toolbar locked-toolbar">
+        <div class="mini-section">
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5" style="stroke:#616161;"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/></svg></div></div>
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5" style="stroke:#616161;"><path d="M20 20H7L3 16l10.5-10.5a2 2 0 012.83 0l4.24 4.24a2 2 0 010 2.83L14 19"/><line x1="6" y1="20" x2="20" y2="20"/></svg></div></div>
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5" style="stroke:#616161;"><polygon points="12,3 3,21 21,21"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section" style="opacity:0.4;">
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#616161" stroke-width="2" stroke-linecap="round"/></svg></div></div>
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#616161" stroke-width="4" stroke-linecap="round"/></svg></div></div>
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#616161" stroke-width="7" stroke-linecap="round"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section" style="opacity:0.4;">
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;opacity:0.4;"><div class="mini-color-dot dot-black"></div></div>
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;opacity:0.4;"><div class="mini-color-dot dot-red"></div></div>
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;opacity:0.4;"><div class="mini-color-dot dot-blue"></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" style="stroke:#616161;" fill="none"><path d="M3 7v6h6"/><path d="M3 13C5.4 7.9 11 4 17 5.1A9 9 0 0121 13"/></svg></div></div>
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" style="stroke:#616161;" fill="none"><path d="M21 7v6h-6"/><path d="M21 13A9 9 0 007 5.1C5 6.4 3.5 8.6 3 11"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div class="mini-btn" style="position:relative;">
+            <div class="mini-inner" style="background:rgba(165,214,167,0.2);border-radius:6px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none" style="stroke:#A5D6A7;"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="2"/><path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 9c1.7 0 4 1.3 4 4"/></svg>
+            </div>
+            <div style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:#A5D6A7;border:1.5px solid #2C2C2C;"></div>
+          </div>
+        </div>
+        <div class="mini-divider"></div>
+        <div style="display:flex;align-items:center;gap:4px;padding:0 8px;">
+          <div class="mini-btn"><div class="mini-inner"><svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="15,6 9,12 15,18"/></svg></div></div>
+          <span class="mini-page-label">1/3</span>
+          <div class="mini-btn"><div class="mini-inner"><svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="9,6 15,12 9,18"/></svg></div></div>
+        </div>
+      </div>
+
+    </div><!-- /mini-screen -->
+    <div class="state-desc-bar">
+      顶部橙色 Banner · 画布区加半透明遮罩 · 中央锁定浮窗提示 · 工具栏绘图功能全部禁用（变暗）
+    </div>
+  </div><!-- /state-card 3 -->
+
+
+  <!-- ═══════════════════════════════════════════
+       状态 4：断线重连中
+       ═══════════════════════════════════════════ -->
+  <div class="state-card">
+    <div class="state-card-header">
+      <span class="state-card-num">04</span>
+      <span class="state-card-title">断线重连中</span>
+      <span class="state-card-badge badge-error">连接已断开</span>
+    </div>
+
+    <div class="mini-screen">
+
+      <!-- 顶部 Banner（红色，重连中） -->
+      <div class="top-banner banner-error">
+        <div class="reconnect-spinner"></div>
+        连接已断开，正在重连中（第 2/5 次尝试）...
+      </div>
+
+      <!-- 在线人数（显示上次连接状态，灰色） -->
+      <div class="online-badge" style="opacity:0.5;">
+        <div class="online-badge-dot" style="background:#9E9E9E;"></div>
+        <div class="avatar-stack">
+          <div class="avatar" style="background:#555;">主</div>
+          <div class="avatar" style="background:#555;">B</div>
+        </div>
+        <span style="font-size:13px;color:#9E9E9E;">离线</span>
+      </div>
+
+      <!-- 画布内容（正常可见，本地书写不受影响） -->
+      <svg class="canvas-svg" viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
+        <rect width="640" height="360" fill="#1E1E1E"/>
+        <path d="M 60 160 C 100 130, 160 170, 200 140 C 240 110, 280 155, 320 130"
+              stroke="#1E88E5" stroke-width="3" fill="none" stroke-linecap="round" opacity="0.7"/>
+        <rect x="80" y="200" width="160" height="90" rx="4"
+              stroke="#FFFFFF" stroke-width="2" fill="none" opacity="0.5"/>
+        <!-- 本地新增笔迹（离线期间书写，虚线表示未同步） -->
+        <path d="M 380 150 C 420 125, 470 160, 510 140 C 540 125, 570 148, 600 135"
+              stroke="#EEEEEE" stroke-width="3" fill="none" stroke-linecap="round"
+              stroke-dasharray="6,3" opacity="0.6"/>
+        <!-- 未同步标注 -->
+        <text x="540" y="120" fill="#FFCC80" font-size="11" opacity="0.8">未同步</text>
+      </svg>
+
+      <!-- 工具栏（正常可用，本地书写不中断） -->
+      <div class="mini-toolbar">
+        <div class="mini-section">
+          <div class="mini-btn active"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25z"/><path d="M20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5"><path d="M20 20H7L3 16l10.5-10.5a2 2 0 012.83 0l4.24 4.24a2 2 0 010 2.83L14 19"/><line x1="6" y1="20" x2="20" y2="20"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2.5"><polygon points="12,3 3,21 21,21"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div class="mini-btn"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#9E9E9E" stroke-width="2" stroke-linecap="round"/></svg></div></div>
+          <div class="mini-btn active"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#003C8F" stroke-width="4" stroke-linecap="round"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="24" height="10" viewBox="0 0 24 10"><line x1="2" y1="5" x2="22" y2="5" stroke="#9E9E9E" stroke-width="7" stroke-linecap="round"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;"><div class="mini-color-dot dot-black dot-selected"></div></div>
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;"><div class="mini-color-dot dot-red"></div></div>
+          <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;"><div class="mini-color-dot dot-blue"></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none"><path d="M3 7v6h6"/><path d="M3 13C5.4 7.9 11 4 17 5.1A9 9 0 0121 13"/></svg></div></div>
+          <div class="mini-btn disabled"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none"><path d="M21 7v6h-6"/><path d="M21 13A9 9 0 007 5.1C5 6.4 3.5 8.6 3 11"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div class="mini-section">
+          <!-- 协同按钮（断线中，红色警告状态） -->
+          <div class="mini-btn" style="position:relative;">
+            <div class="mini-inner" style="background:rgba(239,154,154,0.15);border-radius:6px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none" style="stroke:#EF9A9A;"><circle cx="9" cy="7" r="3"/><circle cx="17" cy="7" r="2"/><path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M17 9c1.7 0 4 1.3 4 4"/></svg>
+            </div>
+            <!-- 红点徽章 -->
+            <div style="position:absolute;top:6px;right:6px;width:8px;height:8px;border-radius:50%;background:#EF9A9A;border:1.5px solid #2C2C2C;"></div>
+          </div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24" stroke-width="2" fill="none"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="5" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/><rect x="16" y="5" width="3" height="3" fill="#9E9E9E" stroke="none"/><rect x="5" y="16" width="3" height="3" fill="#9E9E9E" stroke="none"/></svg></div></div>
+          <div class="mini-btn"><div class="mini-inner"><svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="#9E9E9E"/><circle cx="12" cy="12" r="1.5" fill="#9E9E9E"/><circle cx="12" cy="19" r="1.5" fill="#9E9E9E"/></svg></div></div>
+        </div>
+        <div class="mini-divider"></div>
+        <div style="display:flex;align-items:center;gap:4px;padding:0 8px;">
+          <div class="mini-btn"><div class="mini-inner"><svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="15,6 9,12 15,18"/></svg></div></div>
+          <span class="mini-page-label">1/3</span>
+          <div class="mini-btn"><div class="mini-inner"><svg width="14" height="14" viewBox="0 0 24 24" stroke-width="2.5"><polyline points="9,6 15,12 9,18"/></svg></div></div>
+        </div>
+      </div>
+
+    </div><!-- /mini-screen -->
+    <div class="state-desc-bar">
+      顶部红色 Banner + 旋转动画 · 在线徽章变灰（显示离线）· 协同按钮红色警告 · 本地书写不中断 · 虚线笔迹表示未同步内容
+    </div>
+  </div><!-- /state-card 4 -->
+
+</div><!-- /states-grid -->
+
+</body>
+</html>

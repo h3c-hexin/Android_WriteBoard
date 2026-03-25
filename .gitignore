@@ -1,0 +1,36 @@
+## Gradle
+.gradle/
+build/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+
+## Android Studio / IntelliJ IDEA
+.idea/
+*.iml
+*.ipr
+*.iws
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+## Signing
+*.jks
+*.keystore
+keystore.properties
+
+## APK / AAB
+*.apk
+*.aab
+*.ap_
+
+## Log / profiling
+*.hprof
+lint/
+
+## macOS
+.DS_Store
+
+## Claude Code
+.claude/
