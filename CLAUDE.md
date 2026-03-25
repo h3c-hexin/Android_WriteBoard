@@ -1,7 +1,7 @@
 # PaintBoard — Claude 工作约定
 
 ## 项目当前状态
-模块 1~11 ✅，MVP 全部完成
+模块 1~11 ✅ + 书写流畅度优化 ✅，v1.0.0 已发布
 
 ## 架构约定
 - MVVM + Hilt；ViewModel：`ui/canvas/CanvasViewModel.kt`
