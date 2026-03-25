@@ -23,6 +23,15 @@
 - `data/share/`      ShareRepository（Ktor HTTP 服务）、PageBitmapRenderer
 - `ui/share/`        SharePopup、FullscreenQROverlay
 - `ui/theme/`        颜色 token（ToolbarBackground, ActiveIconBackground…）
+- `data/collab/`     CollabRepository（WebSocket HOST/CLIENT、NSD）
+- `ui/collab/`       CollabPopup
+
+## 文档导航
+- 需求 / 功能边界   → `docs/requirements.md`
+- 待办 / Backlog   → `docs/develop/backlog.md`
+- 模块实现详情     → `docs/develop/progress.md`
+- 架构说明         → `docs/develop/architecture.md`
+- UX 设计规范      → `docs/designs/`（按功能名找对应文件）
 
 ## 文档约定
 - 实现与设计的偏差记录在 `docs/develop/progress.md` 对应模块节（一句话即可）
