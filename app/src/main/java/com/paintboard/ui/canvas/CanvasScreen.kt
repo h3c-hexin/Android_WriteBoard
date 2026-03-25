@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -33,6 +35,7 @@ fun CanvasScreen(
     val showFullscreenQR by viewModel.showFullscreenQR.collectAsState()
     val shareState by viewModel.shareState.collectAsState()
     val collabState by viewModel.collabState.collectAsState()
+    val showRestoreDialog by viewModel.showRestoreDialog.collectAsState()
 
     Box(
         modifier = Modifier
@@ -69,6 +72,25 @@ fun CanvasScreen(
                     textAlign = TextAlign.Center
                 )
             }
+        }
+
+        // 启动恢复询问 Dialog
+        if (showRestoreDialog) {
+            AlertDialog(
+                onDismissRequest = { /* 强制选择，不允许点外部关闭 */ },
+                title = { Text("恢复白板") },
+                text = { Text("检测到上次未保存的内容，是否恢复？") },
+                confirmButton = {
+                    TextButton(onClick = { viewModel.confirmRestore() }) {
+                        Text("恢复")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { viewModel.discardRestore() }) {
+                        Text("新建白板")
+                    }
+                }
+            )
         }
 
         // 全屏二维码展示层

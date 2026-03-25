@@ -114,19 +114,35 @@ class CanvasViewModel @Inject constructor(
     private val _eraserCursor = MutableStateFlow<Pair<Float, Float>?>(null)
     val eraserCursor: StateFlow<Pair<Float, Float>?> = _eraserCursor.asStateFlow()
 
-    // ===== 启动时同步恢复自动存盘 =====
+    // ===== 启动恢复询问 =====
+    private val _showRestoreDialog = MutableStateFlow(false)
+    val showRestoreDialog: StateFlow<Boolean> = _showRestoreDialog.asStateFlow()
+
     init {
-        val saved = boardRepository.loadAutosave()
-        if (!saved.isNullOrEmpty()) {
+        // 有自动存盘时弹询问，不直接恢复
+        if (!boardRepository.loadAutosave().isNullOrEmpty()) {
+            _showRestoreDialog.value = true
+        }
+    }
+
+    /** 用户选择恢复上次内容 */
+    fun confirmRestore() {
+        _showRestoreDialog.value = false
+        val saved = boardRepository.loadAutosave() ?: return
+        if (saved.isNotEmpty()) {
             _pages.value = saved
             _page.value = saved[0]
             updateUndoRedoState()
         }
     }
 
-    // 本次橡皮擦手势：记录原始笔画和分割后的片段，抬手时合并为一步 Undo
-    private val gestureRemovedOriginals = mutableListOf<Stroke>()
-    private val gestureAddedSplits = mutableListOf<Stroke>()
+    /** 用户选择新建白板 */
+    fun discardRestore() {
+        _showRestoreDialog.value = false
+    }
+
+    // 本次橡皮擦手势：手势开始时的页面快照，用于抬手时对比 pre/post 得到真实 delta
+    private var preErasureStrokes: List<Stroke> = emptyList()
 
     // ===== 正在绘制的笔画（临时状态，不在 page 中）=====
     private val _activeStroke = MutableStateFlow<List<StrokePoint>>(emptyList())
@@ -350,10 +366,9 @@ class CanvasViewModel @Inject constructor(
 
     // ===== 橡皮擦操作 =====
 
-    /** 手指按下：开始擦除手势，清空本次手势记录 */
+    /** 手指按下：开始擦除手势，快照当前页状态 */
     fun onEraserBegin(nx: Float, ny: Float, radiusFraction: Float, aspectRatio: Float) {
-        gestureRemovedOriginals.clear()
-        gestureAddedSplits.clear()
+        preErasureStrokes = currentPage().strokes.toList()
         _eraserCursor.value = Pair(nx, ny)
         doErase(nx, ny, radiusFraction, aspectRatio)
     }
@@ -364,18 +379,20 @@ class CanvasViewModel @Inject constructor(
         doErase(nx, ny, radiusFraction, aspectRatio)
     }
 
-    /** 手指抬起：结束擦除，将整次手势合并为一个 Undo 步骤 */
+    /** 手指抬起：结束擦除，用 pre/post 快照对比得到真实 delta，合并为一步 Undo */
     fun onEraserEnd() {
         _eraserCursor.value = null
-        if (gestureRemovedOriginals.isNotEmpty()) {
-            val removed = gestureRemovedOriginals.toList()
-            val added = gestureAddedSplits.toList()
+        val post = currentPage().strokes.toList()
+        val preIds = preErasureStrokes.map { it.id }.toSet()
+        val postIds = post.map { it.id }.toSet()
+        val removed = preErasureStrokes.filter { it.id !in postIds }
+        val added   = post.filter { it.id !in preIds }
+        if (removed.isNotEmpty() || added.isNotEmpty()) {
             pushUndo(UndoAction.SplitEraseStrokes(removedOriginals = removed, addedSplits = added))
             broadcastEraseOp(removed, added)
             hostBroadcastPageSync()
         }
-        gestureRemovedOriginals.clear()
-        gestureAddedSplits.clear()
+        preErasureStrokes = emptyList()
     }
 
     /**
@@ -414,9 +431,7 @@ class CanvasViewModel @Inject constructor(
 
             // 有交集：进行分割
             hasChanges = true
-            gestureRemovedOriginals.add(stroke)
             val splits = splitStrokeByEraser(stroke, nx, ny, rSq, aspectRatio)
-            gestureAddedSplits.addAll(splits)
             newPageStrokes.addAll(splits)
         }
 
@@ -1090,9 +1105,12 @@ class CanvasViewModel @Inject constructor(
                         list.map { p ->
                             if (p.id != pageId) p
                             else {
-                                val hadAny = toRemove.any { id -> p.strokes.any { it.id == id } }
+                                // toRemove 为空时（undo 恢复操作）直接追加；
+                                // toRemove 非空时必须至少有一个 ID 存在，防止并发擦除产生幽灵笔画
+                                val shouldAdd = toRemove.isEmpty() ||
+                                    toRemove.any { id -> p.strokes.any { it.id == id } }
                                 val filtered = p.strokes.filter { it.id !in toRemove }
-                                p.copy(strokes = if (hadAny) filtered + toAdd else filtered)
+                                p.copy(strokes = if (shouldAdd) filtered + toAdd else filtered)
                             }
                         }
                     }
