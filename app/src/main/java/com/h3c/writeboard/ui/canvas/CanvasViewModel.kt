@@ -826,7 +826,6 @@ class CanvasViewModel @Inject constructor(
         val devices: List<CollabDevice> = emptyList(),
         val error: String? = null,
         val nsdTimeout: Boolean = false,
-        val lastHost: String? = null,
         val lastRoomCode: String? = null
     )
 
@@ -899,7 +898,6 @@ class CanvasViewModel @Inject constructor(
             _collabState.value = CollabUiState(
                 role = CollabRole.NONE,
                 error = "连接已断开",
-                lastHost = _lastHost,
                 lastRoomCode = _lastRoomCode
             )
         }
@@ -933,12 +931,7 @@ class CanvasViewModel @Inject constructor(
 
     /** 用户主动离开：清除上次连接记录 */
     fun leaveSession() {
-        collabRepository.leaveSession()
-        collabRepository.onDeviceListChanged = null
-        collabRepository.onMessageReceived = null
-        collabRepository.onSessionEnded = null
-        collabRepository.onConnectionLost = null
-        collabRepository.onJoinFailed = null
+        clearJoinCallbacks()
         _lastHost = null
         _lastRoomCode = null
         _collabState.value = CollabUiState()
@@ -946,13 +939,17 @@ class CanvasViewModel @Inject constructor(
 
     /** 退后台等被动断开：保留上次连接记录 */
     fun leaveSessionKeepHistory() {
+        clearJoinCallbacks()
+        _collabState.value = CollabUiState(lastRoomCode = _lastRoomCode)
+    }
+
+    private fun clearJoinCallbacks() {
         collabRepository.leaveSession()
         collabRepository.onDeviceListChanged = null
         collabRepository.onMessageReceived = null
         collabRepository.onSessionEnded = null
         collabRepository.onConnectionLost = null
         collabRepository.onJoinFailed = null
-        _collabState.value = CollabUiState(lastHost = _lastHost, lastRoomCode = _lastRoomCode)
     }
 
     /** 重新���入上次协同 */
