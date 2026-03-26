@@ -2,12 +2,15 @@ package com.h3c.writeboard.data.file
 
 import android.content.Context
 import android.net.Uri
+import android.util.Log
 import com.h3c.writeboard.domain.model.DrawingPage
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.io.File
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -48,7 +51,11 @@ class BoardRepository @Inject constructor(
                 ?.readText()
                 ?: return null
             json.decodeFromString<BoardFile>(text).pages
-        } catch (e: Exception) {
+        } catch (e: IOException) {
+            Log.e(TAG, "Failed to read board file", e)
+            null
+        } catch (e: SerializationException) {
+            Log.e(TAG, "Failed to deserialize board file", e)
             null
         }
     }
@@ -68,8 +75,16 @@ class BoardRepository @Inject constructor(
         if (!autosaveFile.exists()) return null
         return try {
             json.decodeFromString<BoardFile>(autosaveFile.readText(Charsets.UTF_8)).pages
-        } catch (e: Exception) {
+        } catch (e: IOException) {
+            Log.e(TAG, "Failed to read autosave", e)
+            null
+        } catch (e: SerializationException) {
+            Log.e(TAG, "Failed to deserialize autosave", e)
             null
         }
+    }
+
+    companion object {
+        private const val TAG = "BoardRepository"
     }
 }

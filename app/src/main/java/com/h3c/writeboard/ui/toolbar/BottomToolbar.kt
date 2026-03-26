@@ -314,6 +314,7 @@ fun BottomToolbar(
                     onStopHosting = { viewModel.stopHosting() },
                     onJoin = { roomCode -> viewModel.joinSession(roomCode) },
                     onJoinDirect = { host, roomCode -> viewModel.joinSessionDirect(host, roomCode) },
+                    onRejoin = { viewModel.rejoinLastSession() },
                     onLeave = { viewModel.leaveSession() },
                     onCancelJoin = { viewModel.leaveSession() },
                     onDismiss = { viewModel.closeCollabPanel() }
@@ -409,7 +410,7 @@ fun BottomToolbar(
         ToolButton(
             icon = Icons.Default.Add,
             contentDescription = "新增页",
-            isEnabled = pages.size < 20,
+            isEnabled = pages.size < CanvasViewModel.MAX_PAGES,
             onClick = { viewModel.addPage() }
         )
     }

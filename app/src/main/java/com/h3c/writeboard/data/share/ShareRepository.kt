@@ -6,6 +6,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.h3c.writeboard.data.common.NetworkUtils
 import com.h3c.writeboard.domain.model.DrawingPage
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.ktor.http.ContentType
@@ -22,9 +23,6 @@ import io.ktor.server.routing.routing
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
-import java.net.Inet4Address
-import java.net.NetworkInterface
-import java.security.SecureRandom
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -39,13 +37,7 @@ class ShareRepository @Inject constructor(
     private val pageBitmaps = mutableListOf<Bitmap>()
     private var currentToken: String = ""
 
-    /** 获取设备局域网 IPv4 地址，未连接 WiFi 时返回 null */
-    fun getLocalIp(): String? = try {
-        NetworkInterface.getNetworkInterfaces()?.toList()
-            ?.flatMap { it.inetAddresses?.toList() ?: emptyList() }
-            ?.firstOrNull { !it.isLoopbackAddress && it is Inet4Address }
-            ?.hostAddress
-    } catch (_: Exception) { null }
+    fun getLocalIp(): String? = NetworkUtils.getLocalIp()
 
     /**
      * 渲染所有页面为 PNG → 生成新 Token → 启动（或复用）HTTP 服务
@@ -75,12 +67,12 @@ class ShareRepository @Inject constructor(
             EncodeHintType.CHARACTER_SET to "UTF-8"
         )
         val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, sizePx, sizePx, hints)
-        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
-        for (x in 0 until sizePx) {
-            for (y in 0 until sizePx) {
-                bmp.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
-            }
+        val pixels = IntArray(sizePx * sizePx) { i ->
+            if (matrix[i % sizePx, i / sizePx]) android.graphics.Color.BLACK
+            else android.graphics.Color.WHITE
         }
+        val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        bmp.setPixels(pixels, 0, sizePx, 0, 0, sizePx, sizePx)
         return bmp
     }
 
@@ -95,10 +87,7 @@ class ShareRepository @Inject constructor(
 
     // ===== 内部实现 =====
 
-    private fun newToken(): String {
-        val bytes = ByteArray(8).also { SecureRandom().nextBytes(it) }
-        return bytes.joinToString("") { "%02x".format(it) }
-    }
+    private fun newToken(): String = NetworkUtils.generateToken()
 
     private fun ensureServerRunning() {
         if (server != null) return

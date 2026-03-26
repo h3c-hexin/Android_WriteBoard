@@ -14,31 +14,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupPositionProvider
-import androidx.compose.ui.window.PopupProperties
 import com.h3c.writeboard.domain.model.ShapeType
 import com.h3c.writeboard.ui.canvas.ShapeRenderer
+import com.h3c.writeboard.ui.common.ToolbarPopup
 import com.h3c.writeboard.ui.theme.ActiveIconBackground
 import com.h3c.writeboard.ui.theme.ActiveIconDark
-import com.h3c.writeboard.ui.theme.BottomSheetBackground
 import com.h3c.writeboard.ui.theme.IconDefault
 
 /** 图形类型列表（顺序对应 2×3 宫格）*/
@@ -61,33 +52,8 @@ fun ShapePanel(
     onShapeSelected: (ShapeType) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val density = LocalDensity.current
-    val toolbarHeightPx = with(density) { 72.dp.roundToPx() }
-
-    Popup(
-        popupPositionProvider = object : PopupPositionProvider {
-            override fun calculatePosition(
-                anchorBounds: IntRect,
-                windowSize: IntSize,
-                layoutDirection: LayoutDirection,
-                popupContentSize: IntSize
-            ): IntOffset {
-                val x = (anchorBounds.left + anchorBounds.width / 2 - popupContentSize.width / 2)
-                    .coerceIn(8, (windowSize.width - popupContentSize.width - 8).coerceAtLeast(8))
-                val y = windowSize.height - toolbarHeightPx - popupContentSize.height
-                return IntOffset(x, y)
-            }
-        },
-        onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true, dismissOnClickOutside = true)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = BottomSheetBackground,
-            shadowElevation = 12.dp,
-            tonalElevation = 4.dp
-        ) {
-            Column(
+    ToolbarPopup(onDismiss = onDismiss) {
+        Column(
                 modifier = Modifier
                     .width(280.dp)
                     .padding(horizontal = 20.dp, vertical = 16.dp)
@@ -119,7 +85,6 @@ fun ShapePanel(
                         }
                     }
                 }
-            }
         }
     }
 }

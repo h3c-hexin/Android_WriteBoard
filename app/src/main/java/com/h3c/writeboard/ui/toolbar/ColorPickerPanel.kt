@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,19 +37,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupPositionProvider
-import androidx.compose.ui.window.PopupProperties
 import com.h3c.writeboard.domain.model.DrawingToolState
+import com.h3c.writeboard.ui.common.ToolbarPopup
 import com.h3c.writeboard.ui.theme.BottomSheetBackground
 import com.h3c.writeboard.ui.theme.IconDefault
 import com.h3c.writeboard.ui.theme.PresetColors
@@ -101,9 +94,6 @@ fun ColorPickerPanel(
     onColorSelected: (Int) -> Unit,
     onDismiss: () -> Unit
 ) {
-    val density = LocalDensity.current
-    val toolbarHeightPx = with(density) { 72.dp.roundToPx() }
-
     // ===== 本地 HSV 状态（初始化自当前颜色）=====
     val initHsv = remember(toolState.currentColor) { colorToHsv(toolState.currentColor) }
     var hue by remember { mutableStateOf(initHsv[0]) }
@@ -124,29 +114,7 @@ fun ColorPickerPanel(
         onColorSelected(colorInt)
     }
 
-    Popup(
-        popupPositionProvider = object : PopupPositionProvider {
-            override fun calculatePosition(
-                anchorBounds: IntRect,
-                windowSize: IntSize,
-                layoutDirection: LayoutDirection,
-                popupContentSize: IntSize
-            ): IntOffset {
-                val x = (anchorBounds.left + anchorBounds.width / 2 - popupContentSize.width / 2)
-                    .coerceIn(8, (windowSize.width - popupContentSize.width - 8).coerceAtLeast(8))
-                val y = windowSize.height - toolbarHeightPx - popupContentSize.height
-                return IntOffset(x, y)
-            }
-        },
-        onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true, dismissOnClickOutside = true)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = BottomSheetBackground,
-            shadowElevation = 16.dp,
-            tonalElevation = 4.dp
-        ) {
+    ToolbarPopup(onDismiss = onDismiss, shadowElevation = 16.dp) {
             Column(
                 modifier = Modifier
                     .widthIn(max = 560.dp)
@@ -279,7 +247,6 @@ fun ColorPickerPanel(
             }
         }
     }
-}
 
 // ===== 子组件 =====
 

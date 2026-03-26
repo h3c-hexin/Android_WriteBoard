@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
+import com.h3c.writeboard.data.common.NetworkUtils
 import com.h3c.writeboard.domain.model.CollabDevice
 import com.h3c.writeboard.domain.model.CollabMessage
 import com.h3c.writeboard.domain.model.DrawingPage
@@ -38,8 +39,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.net.Inet4Address
-import java.net.NetworkInterface
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -70,6 +69,9 @@ class CollabRepository @Inject constructor(
     private var clientJob: Job? = null
     private var activeOutgoingChannel: Channel<String>? = null
     private val clientScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /** 客户端成功连接的主机 IP（JOIN_ACK 后可用） */
+    var connectedHostIp: String? = null
+        private set
 
     // ===== 事件回调（由 ViewModel 注册）=====
     var onMessageReceived: ((CollabMessage) -> Unit)? = null
@@ -81,6 +83,13 @@ class CollabRepository @Inject constructor(
 
     companion object {
         const val ERR_NSD_TIMEOUT = "NSD_TIMEOUT"
+        private const val ROOM_CODE_MIN = 100000
+        private const val ROOM_CODE_MAX = 999999
+        private const val HOST_COLOR = "#64B5F6"
+        private const val WS_PING_INTERVAL_MS = 2000L
+        private const val WS_TIMEOUT_MS = 10000L
+        private const val NSD_DISCOVER_TIMEOUT_MS = 5000L
+        private val DEVICE_COLORS = listOf("#81C784", "#FFB74D", "#CE93D8", "#FFF176", "#F48FB1")
     }
 
     // ===== Host：开启协同 =====
@@ -95,12 +104,12 @@ class CollabRepository @Inject constructor(
         getCurrentPageIndex: () -> Int
     ): String {
         if (server != null) return currentRoomCode
-        currentRoomCode = (100000..999999).random().toString()
+        currentRoomCode = (ROOM_CODE_MIN..ROOM_CODE_MAX).random().toString()
 
         connectedDevices["host"] = CollabDevice(
             deviceId = "host",
             deviceName = hostDeviceName,
-            deviceColor = "#64B5F6",
+            deviceColor = HOST_COLOR,
             isHost = true
         )
         notifyDeviceListChanged()
@@ -142,7 +151,7 @@ class CollabRepository @Inject constructor(
     fun joinSession(roomCode: String, deviceName: String) {
         val channel = setupClientChannel()
         clientJob = clientScope.launch {
-            val hostInfo = withTimeoutOrNull(5000L) { discoverHost(roomCode) }
+            val hostInfo = withTimeoutOrNull(NSD_DISCOVER_TIMEOUT_MS) { discoverHost(roomCode) }
             if (hostInfo == null) {
                 onJoinFailed?.invoke(ERR_NSD_TIMEOUT)
                 return@launch
@@ -178,17 +187,7 @@ class CollabRepository @Inject constructor(
 
     fun getConnectedDevices(): List<CollabDevice> = connectedDevices.values.toList()
 
-    /** 获取本机局域网 IPv4 地址（用于 Host 展示给子设备手动连接） */
-    fun getLocalIp(): String? {
-        return try {
-            NetworkInterface.getNetworkInterfaces()?.toList()
-                ?.filter { !it.isLoopback && it.isUp }
-                ?.flatMap { it.inetAddresses.toList() }
-                ?.filterIsInstance<Inet4Address>()
-                ?.firstOrNull { !it.isLoopbackAddress }
-                ?.hostAddress
-        } catch (_: Exception) { null }
-    }
+    fun getLocalIp(): String? = NetworkUtils.getLocalIp()
 
     // ===== 内部：WebSocket 客户端连接 =====
 
@@ -209,10 +208,12 @@ class CollabRepository @Inject constructor(
     ) {
         var sessionEndedNormally = false
         var joinSucceeded = false
+        connectedHostIp = hostIp
 
         try {
-            HttpClient(CIO) { install(WebSockets) }
-                .webSocket("ws://$hostIp:$hostPort/collab") {
+            val client = HttpClient(CIO) { install(WebSockets) }
+            try {
+            client.webSocket("ws://$hostIp:$hostPort/collab") {
                     // 发送协程：消费 channel
                     val sendJob = launch {
                         for (text in channel) {
@@ -279,6 +280,9 @@ class CollabRepository @Inject constructor(
 
                     sendJob.cancel()
                 }
+            } finally {
+                client.close()
+            }
         } catch (e: CancellationException) {
             throw e   // 协程被主动取消（leaveSession），不触发断线回调
         } catch (e: Exception) {
@@ -388,8 +392,8 @@ class CollabRepository @Inject constructor(
 
     private fun Application.configureWebSocket(getPages: () -> List<DrawingPage>, getCurrentPageIndex: () -> Int) {
         install(ServerWebSockets) {
-            pingPeriodMillis = 2000
-            timeoutMillis = 10000
+            pingPeriodMillis = WS_PING_INTERVAL_MS
+            timeoutMillis = WS_TIMEOUT_MS
         }
         routing {
             webSocket("/collab") {
@@ -441,9 +445,9 @@ class CollabRepository @Inject constructor(
         }
         if (!joined) return
 
-        val colors = listOf("#81C784", "#FFB74D", "#CE93D8", "#FFF176", "#F48FB1")
         val usedColors = connectedDevices.values.map { it.deviceColor }.toSet()
-        val color = colors.firstOrNull { it !in usedColors } ?: colors[connectedDevices.size % colors.size]
+        val color = DEVICE_COLORS.firstOrNull { it !in usedColors }
+            ?: DEVICE_COLORS[connectedDevices.size % DEVICE_COLORS.size]
 
         val device = CollabDevice(deviceId = deviceId, deviceName = deviceName, deviceColor = color)
         connectedDevices[deviceId] = device
@@ -487,10 +491,7 @@ class CollabRepository @Inject constructor(
 
     // ===== 工具方法 =====
 
-    private fun newDeviceId(): String {
-        val bytes = ByteArray(4).also { java.security.SecureRandom().nextBytes(it) }
-        return bytes.joinToString("") { "%02x".format(it) }
-    }
+    private fun newDeviceId(): String = NetworkUtils.generateToken(byteLength = 4)
 
     private fun notifyDeviceListChanged() {
         onDeviceListChanged?.invoke(connectedDevices.values.toList())

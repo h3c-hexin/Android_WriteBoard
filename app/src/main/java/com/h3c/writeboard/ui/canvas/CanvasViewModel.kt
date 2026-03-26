@@ -44,6 +44,19 @@ class CanvasViewModel @Inject constructor(
     val collabRepository: CollabRepository
 ) : ViewModel() {
 
+    companion object {
+        const val MAX_PAGES = 20
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        when (_collabState.value.role) {
+            CollabRole.HOST -> collabRepository.stopHosting()
+            CollabRole.PARTICIPANT -> collabRepository.leaveSession()
+            else -> Unit
+        }
+    }
+
     // ===== 自动存盘 Job =====
     private var autosaveJob: Job? = null
 
@@ -62,6 +75,10 @@ class CanvasViewModel @Inject constructor(
      */
     private val _page = MutableStateFlow(_firstPage)
     val page: StateFlow<DrawingPage> = _page.asStateFlow()
+
+    // 自增计数器，JOIN_ACK 全量同步后 +1，通知 DrawingCanvas 清空 pathCache
+    private val _pathCacheVersion = MutableStateFlow(0)
+    val pathCacheVersion: StateFlow<Int> = _pathCacheVersion.asStateFlow()
 
     // ===== 工具状态 =====
     private val _toolState = MutableStateFlow(DrawingToolState())
@@ -402,7 +419,7 @@ class CanvasViewModel @Inject constructor(
         if (removed.isNotEmpty() || added.isNotEmpty()) {
             pushUndo(UndoAction.SplitEraseStrokes(removedOriginals = removed, addedSplits = added))
             broadcastEraseOp(removed, added)
-            hostBroadcastPageSync()
+            hostBroadcastPageSyncDebounced()
         }
         preErasureStrokes = emptyList()
     }
@@ -598,7 +615,7 @@ class CanvasViewModel @Inject constructor(
         pushUndo(UndoAction.ClearPage(strokes))
         updateCurrentPage { it.copy(strokes = emptyList()) }
         broadcastPageClear()
-        hostBroadcastPageSync()
+        hostBroadcastPageSyncDebounced()
     }
 
     fun setColor(color: Int) {
@@ -626,7 +643,7 @@ class CanvasViewModel @Inject constructor(
     /** 在末尾新增一页（最多 20 页）*/
     fun addPage() {
         val pages = _pages.value
-        if (pages.size >= 20) return
+        if (pages.size >= MAX_PAGES) return
         val newPage = DrawingPage(
             id = UUID.randomUUID().toString(),
             background = pages.last().background   // 继承最后一页背景类型
@@ -808,7 +825,9 @@ class CanvasViewModel @Inject constructor(
         val hostIp: String? = null,
         val devices: List<CollabDevice> = emptyList(),
         val error: String? = null,
-        val nsdTimeout: Boolean = false
+        val nsdTimeout: Boolean = false,
+        val lastHost: String? = null,
+        val lastRoomCode: String? = null
     )
 
     private val _collabState = MutableStateFlow(CollabUiState())
@@ -816,6 +835,10 @@ class CanvasViewModel @Inject constructor(
 
     private val _showCollabPanel = MutableStateFlow(false)
     val showCollabPanel: StateFlow<Boolean> = _showCollabPanel.asStateFlow()
+
+    // 上次成功加入的连接信息（供"重新加入"使用）
+    private var _lastHost: String? = null
+    private var _lastRoomCode: String? = null
 
     fun openCollabPanel() { _showCollabPanel.value = true }
     fun closeCollabPanel() { _showCollabPanel.value = false }
@@ -873,7 +896,12 @@ class CanvasViewModel @Inject constructor(
             _showCollabPanel.value = false
         }
         collabRepository.onConnectionLost = {
-            _collabState.update { CollabUiState(role = CollabRole.NONE, error = "连接已断开，请重新加入") }
+            _collabState.value = CollabUiState(
+                role = CollabRole.NONE,
+                error = "连接已断开",
+                lastHost = _lastHost,
+                lastRoomCode = _lastRoomCode
+            )
         }
         collabRepository.onJoinFailed = { errMsg ->
             if (errMsg == CollabRepository.ERR_NSD_TIMEOUT) {
@@ -889,17 +917,21 @@ class CanvasViewModel @Inject constructor(
     }
 
     fun joinSession(roomCode: String) {
+        _lastRoomCode = roomCode
         registerJoinCallbacks()
         _collabState.value = CollabUiState(role = CollabRole.CONNECTING)
         collabRepository.joinSession(roomCode = roomCode, deviceName = "PAD")
     }
 
     fun joinSessionDirect(host: String, roomCode: String) {
+        _lastHost = host
+        _lastRoomCode = roomCode
         registerJoinCallbacks()
         _collabState.value = CollabUiState(role = CollabRole.CONNECTING)
         collabRepository.joinSessionDirect(host = host, roomCode = roomCode, deviceName = "PAD")
     }
 
+    /** 用户主动离开：清除上次连接记录 */
     fun leaveSession() {
         collabRepository.leaveSession()
         collabRepository.onDeviceListChanged = null
@@ -907,7 +939,27 @@ class CanvasViewModel @Inject constructor(
         collabRepository.onSessionEnded = null
         collabRepository.onConnectionLost = null
         collabRepository.onJoinFailed = null
+        _lastHost = null
+        _lastRoomCode = null
         _collabState.value = CollabUiState()
+    }
+
+    /** 退后台等被动断开：保留上次连接记录 */
+    fun leaveSessionKeepHistory() {
+        collabRepository.leaveSession()
+        collabRepository.onDeviceListChanged = null
+        collabRepository.onMessageReceived = null
+        collabRepository.onSessionEnded = null
+        collabRepository.onConnectionLost = null
+        collabRepository.onJoinFailed = null
+        _collabState.value = CollabUiState(lastHost = _lastHost, lastRoomCode = _lastRoomCode)
+    }
+
+    /** 重新���入上次协同 */
+    fun rejoinLastSession() {
+        val host = _lastHost ?: return
+        val room = _lastRoomCode ?: return
+        joinSessionDirect(host, room)
     }
 
     // ===== 本地操作广播给远端 =====
@@ -965,15 +1017,23 @@ class CanvasViewModel @Inject constructor(
         broadcast(CollabMessage(type = CollabMessage.PAGE_CLEAR, pageId = _page.value.id))
     }
 
-    /** HOST 权威同步：擦除/清除操作后将当前页最终状态广播给所有端，消除并发冲突残影 */
-    private fun hostBroadcastPageSync() {
+    /**
+     * HOST 权威同步（debounce 300ms）：擦除/清除操作后将当前页最终状态广播给所有端。
+     * 延迟发送，让子设备的 STROKE_ADD 有时间到达 HOST，避免全量同步覆盖刚提交的笔画。
+     */
+    private var pageSyncJob: Job? = null
+    private fun hostBroadcastPageSyncDebounced() {
         if (_collabState.value.role != CollabRole.HOST) return
-        val page = _page.value
-        collabRepository.broadcastToAll(CollabMessage(
-            type = CollabMessage.PAGE_STROKES_SYNC,
-            pageId = page.id,
-            strokes = page.strokes
-        ))
+        pageSyncJob?.cancel()
+        pageSyncJob = viewModelScope.launch {
+            delay(300)
+            val page = _page.value
+            collabRepository.broadcastToAll(CollabMessage(
+                type = CollabMessage.PAGE_STROKES_SYNC,
+                pageId = page.id,
+                strokes = page.strokes
+            ))
+        }
     }
 
     private fun broadcastUndo(action: UndoAction) {
@@ -1090,25 +1150,28 @@ class CanvasViewModel @Inject constructor(
                     _page.value = list[idx]
                 }
                 CollabMessage.JOIN_ACK -> {
-                    // PAD 收到 JOIN_ACK：设置 PARTICIPANT（B1 修复），应用全量同步
+                    // 保存连接信息供"重新加入"使用
+                    _lastHost = collabRepository.connectedHostIp
                     _collabState.update { it.copy(role = CollabRole.PARTICIPANT) }
                     val pages = msg.pages ?: return@launch
                     if (pages.isEmpty()) return@launch
                     _pages.value = pages
                     val idx = (msg.pageIndex ?: 0).coerceIn(0, pages.size - 1)
                     _currentPageIndex.value = idx
-                    _page.value = pages[idx]
+                    // 强制新引用，确保 StateFlow 发射触发 Canvas 重绘
+                    _page.value = pages[idx].copy()
+                    _pathCacheVersion.value++
                     updateUndoRedoState()
                 }
                 CollabMessage.PAGE_STROKES_SYNC -> {
-                    // 向后兼容保留，不再主动发送
                     val pageId = msg.pageId ?: return@launch
                     val strokes = msg.strokes ?: return@launch
                     _pages.update { list ->
                         list.map { p -> if (p.id == pageId) p.copy(strokes = strokes) else p }
                     }
                     if (_page.value.id == pageId) {
-                        _page.value = _pages.value[_currentPageIndex.value]
+                        _page.value = _pages.value[_currentPageIndex.value].copy()
+                        _pathCacheVersion.value++
                     }
                 }
                 CollabMessage.ERASE_OP -> {
@@ -1131,7 +1194,7 @@ class CanvasViewModel @Inject constructor(
                     if (_page.value.id == pageId) {
                         _page.value = _pages.value[_currentPageIndex.value]
                     }
-                    hostBroadcastPageSync()
+                    hostBroadcastPageSyncDebounced()
                 }
                 CollabMessage.PAGE_CLEAR -> {
                     val pageId = msg.pageId ?: return@launch
@@ -1141,7 +1204,7 @@ class CanvasViewModel @Inject constructor(
                     if (_page.value.id == pageId) {
                         _page.value = _pages.value[_currentPageIndex.value]
                     }
-                    hostBroadcastPageSync()
+                    hostBroadcastPageSyncDebounced()
                 }
             }
         }

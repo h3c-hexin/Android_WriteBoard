@@ -71,7 +71,7 @@ class FrontBufferStrokeView(context: Context) : SurfaceView(context) {
     }
 
     companion object {
-        private const val SMOOTH_FACTOR = 0.35f
+        private const val SMOOTH_FACTOR = StrokeRenderer.SMOOTH_FACTOR
     }
 
     init {
@@ -163,6 +163,7 @@ class FrontBufferStrokeView(context: Context) : SurfaceView(context) {
 
     /** 手势结束第二步：清空多缓冲层（CanvasScreen 在 50ms 后调用） */
     fun clearStroke() {
+        snapshot = SnapshotState(emptyList(), 1f, 1f)
         renderer?.clear()
     }
 

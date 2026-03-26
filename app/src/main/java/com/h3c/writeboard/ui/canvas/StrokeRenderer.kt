@@ -12,7 +12,7 @@ import kotlin.math.sqrt
  */
 object StrokeRenderer {
 
-    private const val SMOOTH_FACTOR = 0.35f  // 平滑强度，越大越平滑
+    const val SMOOTH_FACTOR = 0.35f
 
     /**
      * 将笔画点列表转换为 Android Path（用于 Canvas 绘制）

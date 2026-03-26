@@ -10,11 +10,15 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -23,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -46,9 +51,37 @@ fun CanvasScreen(
 
     val hasFrontBuffer = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
     val frontBufferViewRef = remember { mutableStateOf<FrontBufferStrokeView?>(null) }
+
+    // HOST 退后台时停止协同 + 回前台清空 FrontBuffer 幽灵笔画
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> {
+                    when (viewModel.collabState.value.role) {
+                        CanvasViewModel.CollabRole.HOST -> viewModel.stopHosting()
+                        CanvasViewModel.CollabRole.PARTICIPANT -> viewModel.leaveSessionKeepHistory()
+                        else -> Unit
+                    }
+                }
+                Lifecycle.Event.ON_START -> {
+                    frontBufferViewRef.value?.clearStroke()
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
     // 待执行的 clearStroke Job，新笔画开始时取消，避免清空正在渲染的笔画
     val scope = rememberCoroutineScope()
     val pendingClearJob = remember { mutableStateOf<Job?>(null) }
+
+    // 全量同步时清空 FrontBuffer 残留渲染
+    val pathCacheVer by viewModel.pathCacheVersion.collectAsState()
+    LaunchedEffect(pathCacheVer) {
+        frontBufferViewRef.value?.clearStroke()
+    }
 
     Box(
         modifier = Modifier

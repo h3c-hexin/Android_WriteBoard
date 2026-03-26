@@ -25,7 +25,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -37,23 +36,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.unit.IntRect
-import androidx.compose.ui.unit.IntSize
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Popup
-import androidx.compose.ui.window.PopupPositionProvider
-import androidx.compose.ui.window.PopupProperties
 import com.h3c.writeboard.domain.model.CollabDevice
+import com.h3c.writeboard.ui.common.ToolbarPopup
 import com.h3c.writeboard.ui.canvas.CanvasViewModel
-import com.h3c.writeboard.ui.theme.BottomSheetBackground
 import com.h3c.writeboard.ui.theme.IconDefault
 
 /**
@@ -72,46 +63,29 @@ fun CollabPopup(
     onStopHosting: () -> Unit,
     onJoin: (roomCode: String) -> Unit,
     onJoinDirect: (host: String, roomCode: String) -> Unit,
+    onRejoin: () -> Unit,
     onLeave: () -> Unit,
     onCancelJoin: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val density = LocalDensity.current
-    val toolbarHeightPx = with(density) { 72.dp.roundToPx() }
-
-    Popup(
-        popupPositionProvider = object : PopupPositionProvider {
-            override fun calculatePosition(
-                anchorBounds: IntRect,
-                windowSize: IntSize,
-                layoutDirection: LayoutDirection,
-                popupContentSize: IntSize
-            ): IntOffset {
-                val x = (anchorBounds.left + anchorBounds.width / 2 - popupContentSize.width / 2)
-                    .coerceIn(8, (windowSize.width - popupContentSize.width - 8).coerceAtLeast(8))
-                val y = windowSize.height - toolbarHeightPx - popupContentSize.height
-                return IntOffset(x, y)
-            }
-        },
-        onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true, dismissOnClickOutside = true)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(16.dp),
-            color = BottomSheetBackground,
-            shadowElevation = 12.dp,
-            tonalElevation = 4.dp
-        ) {
-            when (collabState.role) {
+    ToolbarPopup(onDismiss = onDismiss) {
+        when (collabState.role) {
                 CanvasViewModel.CollabRole.NONE ->
-                    NoneView(collabState.error, collabState.nsdTimeout, onStartHosting, onJoin, onJoinDirect)
+                    NoneView(
+                        error = collabState.error,
+                        nsdTimeout = collabState.nsdTimeout,
+                        lastRoomCode = collabState.lastRoomCode,
+                        onStartHosting = onStartHosting,
+                        onJoin = onJoin,
+                        onJoinDirect = onJoinDirect,
+                        onRejoin = onRejoin
+                    )
                 CanvasViewModel.CollabRole.CONNECTING ->
                     ConnectingView(onCancelJoin)
                 CanvasViewModel.CollabRole.HOST ->
                     HostView(collabState, onStopHosting, onDismiss)
                 CanvasViewModel.CollabRole.PARTICIPANT ->
                     ParticipantView(collabState, onLeave, onDismiss)
-            }
         }
     }
 }
@@ -122,9 +96,11 @@ fun CollabPopup(
 private fun NoneView(
     error: String?,
     nsdTimeout: Boolean,
+    lastRoomCode: String?,
     onStartHosting: () -> Unit,
     onJoin: (String) -> Unit,
-    onJoinDirect: (host: String, roomCode: String) -> Unit
+    onJoinDirect: (host: String, roomCode: String) -> Unit,
+    onRejoin: () -> Unit
 ) {
     var pinInput by remember { mutableStateOf("") }
     var expandManual by remember(nsdTimeout) { mutableStateOf(nsdTimeout) }
@@ -136,6 +112,18 @@ private fun NoneView(
     ) {
         Text("局域网协同", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
         Spacer(Modifier.height(16.dp))
+
+        // 重新加入上次协同
+        if (lastRoomCode != null) {
+            Button(
+                onClick = onRejoin,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("重新加入（房间 $lastRoomCode）", color = Color.White)
+            }
+            Spacer(Modifier.height(12.dp))
+        }
 
         // 开启协同按钮（作为主设备）
         Button(

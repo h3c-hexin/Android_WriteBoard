@@ -51,6 +51,9 @@ import kotlin.math.sqrt
  *   onFrontBufferStrokePoints — 移动中，传入当前全量点列表 + 画布尺寸
  *   onFrontBufferStrokeDone   — 手势结束，通知清空前端缓冲
  */
+private const val GRID_DIVISIONS = 25f
+private const val LINE_DIVISIONS = 18f
+
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun DrawingCanvas(
@@ -64,6 +67,7 @@ fun DrawingCanvas(
 
     val page            by viewModel.page.collectAsState()
     val toolState       by viewModel.toolState.collectAsState()
+    val pathCacheVer    by viewModel.pathCacheVersion.collectAsState()
     val eraserCursor    by viewModel.eraserCursor.collectAsState()
     val activeShapeDrag by viewModel.activeShapeDrag.collectAsState()
 
@@ -93,8 +97,8 @@ fun DrawingCanvas(
         val currentIds = page.strokes.mapTo(HashSet()) { it.id }
         pathCache.keys.retainAll(currentIds)
     }
-    // 画布尺寸变化时清空缓存（路径以像素为单位，尺寸变化后需重建）
-    LaunchedEffect(canvasSize) { pathCache.clear() }
+    // 画布尺寸变化 或 全量同步时 清空缓存
+    LaunchedEffect(canvasSize, pathCacheVer) { pathCache.clear() }
 
     androidx.compose.foundation.Canvas(
         modifier = modifier
@@ -211,7 +215,7 @@ fun DrawingCanvas(
             // ─── 0. 页面背景 ───
             when (page.background) {
                 PageBackground.GRID -> {
-                    val step = w / 25f
+                    val step = w / GRID_DIVISIONS
                     val gridPaint = android.graphics.Paint().apply {
                         color = android.graphics.Color.argb(60, 66, 66, 66)
                         strokeWidth = 1f
@@ -223,7 +227,7 @@ fun DrawingCanvas(
                     while (y < h) { canvas.drawLine(0f, y, w, y, gridPaint); y += step }
                 }
                 PageBackground.LINES -> {
-                    val step = h / 18f
+                    val step = h / LINE_DIVISIONS
                     val linePaint = android.graphics.Paint().apply {
                         color = android.graphics.Color.argb(60, 97, 97, 97)
                         strokeWidth = 1f
@@ -246,13 +250,13 @@ fun DrawingCanvas(
                         stroke.points[0].x, stroke.points[0].y,
                         stroke.points[1].x, stroke.points[1].y,
                         w, h,
-                        buildPaint(stroke.color, stroke.width * w)
+                        configurePaint(stroke.color, stroke.width * w)
                     )
                 } else {
                     val path = pathCache.getOrPut(stroke.id) {
                         StrokeRenderer.buildPath(stroke.points, w, h)
                     }
-                    canvas.drawPath(path, buildPaint(stroke.color, stroke.width * w))
+                    canvas.drawPath(path, configurePaint(stroke.color, stroke.width * w))
                 }
             }
 
@@ -262,7 +266,7 @@ fun DrawingCanvas(
                 val displayed = activeStroke + predictor.predictedPoints()
                 canvas.drawPath(
                     StrokeRenderer.buildPath(displayed, w, h),
-                    buildPaint(toolState.currentColor, toolState.strokeWidth.fraction * w)
+                    configurePaint(toolState.currentColor, toolState.strokeWidth.fraction * w)
                 )
             }
 
@@ -273,7 +277,7 @@ fun DrawingCanvas(
                     drag.startNx, drag.startNy,
                     drag.endNx, drag.endNy,
                     w, h,
-                    buildPaint(toolState.currentColor, toolState.strokeWidth.fraction * w),
+                    configurePaint(toolState.currentColor, toolState.strokeWidth.fraction * w),
                     isDashed = true
                 )
             }
@@ -292,11 +296,14 @@ fun DrawingCanvas(
     }
 }
 
-private fun buildPaint(color: Int, widthPx: Float): Paint = Paint().apply {
-    this.color = color
-    strokeWidth = widthPx.coerceAtLeast(3f)
+private val reusablePaint = Paint().apply {
     style = Paint.Style.STROKE
     strokeCap = Paint.Cap.ROUND
     strokeJoin = Paint.Join.ROUND
     isAntiAlias = true
+}
+
+private fun configurePaint(color: Int, widthPx: Float): Paint = reusablePaint.apply {
+    this.color = color
+    strokeWidth = widthPx.coerceAtLeast(3f)
 }
